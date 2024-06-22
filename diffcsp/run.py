@@ -121,6 +121,7 @@ def run(cfg: DictConfig) -> None:
         wandb_config = cfg.logging.wandb
         wandb_logger = WandbLogger(
             **wandb_config,
+            save_dir=hydra_dir,
             settings=wandb.Settings(start_method="fork"),
             tags=cfg.core.tags,
         )

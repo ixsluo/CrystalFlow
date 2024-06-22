@@ -8,16 +8,16 @@ core:
 
 hydra:
   run:
-    dir: ${oc.env:HYDRA_JOBS}/singlerun/${now:%Y-%m-%d}/${expname}/
+    dir: ${oc.env:HYDRA_JOBS}/singlerun/${expname}/
 
   sweep:
-    dir: ${oc.env:HYDRA_JOBS}/multirun/${now:%Y-%m-%d}/${expname}/
+    dir: ${oc.env:HYDRA_JOBS}/multirun/${expname}/
     subdir: ${hydra.job.num}_${hydra.job.id}
 
   job:
+    chdir: false
     env_set:
       WANDB_START_METHOD: thread
-      WANDB_DIR: ${oc.env:WABDB_DIR}
 
 defaults:
   - data: default
