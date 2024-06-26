@@ -10,12 +10,18 @@ Implementation codes for Crystal Structure Prediction by Joint Equivariant Diffu
 
 ### Dependencies and Setup
 
-```
-python==3.8.13
-torch==1.9.0
-torch-geometric==1.7.2
-pytorch_lightning==1.3.8
-pymatgen==2023.8.10
+```bash
+# sudo apt-get install gfortran libfftw3-dev pkg-config
+conda create -n diffcsp python=3.8.13 cudatoolkit=11.1 cmake openblas
+conda activate diffcsp
+pip install torch==1.8.1+cu111 torchvision==0.9.1+cu111 torchaudio==0.8.1 -f https://download.pytorch.org/whl/torch_stable.html
+pip install torch_geometric==1.7.2 wandb
+pip install --no-index torch_scatter==2.0.8 torch_sparse==0.6.9 torch_cluster==1.5.9 torch_spline_conv==1.2.1 -f https://data.pyg.org/whl/torch-1.8.1+cu111.html
+pip install pytorch_lightning==1.3.8 torch==1.8.1 torchmetrics==0.7.3
+pip install einops pyarrow
+pip install hydra-core omegaconf python-dotenv p_tqdm notebook
+pip install pymatgen pyxtal==0.5.9 smact matminer "ruamel.yaml<0.18.0"
+pip install -e .
 ```
 
 Rename the `.env.template` file into `.env` and specify the following variables.
@@ -26,17 +32,28 @@ HYDRA_JOBS: the absolute path to save hydra outputs
 WABDB_DIR: the absolute path to save wabdb outputs
 ```
 
+example:
+```bash
+# vi .env
+export PROJECT_ROOT="/home/<YOURHOME>/DiffCSP"
+export   HYDRA_JOBS="/home/<YOURHOME>/DiffCSP/hydra"
+export    WANDB_DIR="/home/<YOURHOME>/DiffCSP/log"
+```
+
 ### Training
 
 For the CSP task
 
-```
+```bash
 python diffcsp/run.py data=<dataset> expname=<expname>
+
+# example:
+# python diffcsp/run.py data=mp_20 logging.wandb.group=mp_20 expname=origin
 ```
 
 For the Ab Initio Generation task
 
-```
+```bash
 python diffcsp/run.py data=<dataset> model=diffusion_w_type expname=<expname>
 ```
 
@@ -48,14 +65,18 @@ The ``<dataset>`` tag can be selected from perov_5, mp_20, mpts_52 and carbon_24
 
 One sample 
 
-```
+```bash
 python scripts/evaluate.py --model_path <model_path> --dataset <dataset>
 python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv 
+
+# example:
+# python ~/DiffCSP/scripts/evaluate.py --model_path `pwd` --dataset mp_20
+# python ~/DiffCSP/scripts/compute_metrics.py --root_path `pwd` --tasks csp --gt_file ~/DiffCSP/data/mp_20/test.csv
 ```
 
 Multiple samples
 
-```
+```bash
 python scripts/evaluate.py --model_path <model_path> --dataset <dataset> --num_evals 20
 python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --multi_eval
 ```
