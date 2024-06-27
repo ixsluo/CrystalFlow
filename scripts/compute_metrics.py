@@ -1,32 +1,38 @@
-from collections import Counter
 import argparse
-import os
 import json
+import os
+import pickle
+import sys
+import warnings
+from collections import Counter
+from pathlib import Path
 
 import numpy as np
-from pathlib import Path
-from tqdm import tqdm
-from p_tqdm import p_map
-from scipy.stats import wasserstein_distance
 import pandas as pd
-
-from pymatgen.core.structure import Structure
+from matminer.featurizers.composition.composite import ElementProperty
+from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
+from p_tqdm import p_map
+from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice
-from pymatgen.analysis.structure_matcher import StructureMatcher
-from matminer.featurizers.site.fingerprint import CrystalNNFingerprint
-from matminer.featurizers.composition.composite import ElementProperty
-
+from pymatgen.core.structure import Structure
 from pyxtal import pyxtal
+from scipy.stats import wasserstein_distance
+from tqdm import tqdm
 
-import pickle
-
-import sys
 sys.path.append('.')
 
 from eval_utils import (
-    smact_validity, structure_validity, CompScaler, get_fp_pdist,
-    load_config, load_data, get_crystals_list, prop_model_eval, compute_cov)
+    CompScaler,
+    compute_cov,
+    get_crystals_list,
+    get_fp_pdist,
+    load_config,
+    load_data,
+    prop_model_eval,
+    smact_validity,
+    structure_validity,
+)
 
 CrystalNNFP = CrystalNNFingerprint.from_preset("ops")
 CompFP = ElementProperty.from_preset('magpie')
@@ -106,8 +112,9 @@ class Crystal(object):
         comp = Composition(elem_counter)
         self.comp_fp = CompFP.featurize(comp)
         try:
-            site_fps = [CrystalNNFP.featurize(
-                self.structure, i) for i in range(len(self.structure))]
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore')
+                site_fps = [CrystalNNFP.featurize(self.structure, i) for i in range(len(self.structure))]
         except Exception:
             # counts crystal as invalid if fingerprint cannot be constructed.
             self.valid = False
@@ -363,7 +370,9 @@ def get_crystal_array_list(file_path, batch_idx=0):
 
 
 def get_gt_crys_ori(cif):
-    structure = Structure.from_str(cif,fmt='cif')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        structure = Structure.from_str(cif,fmt='cif')
     lattice = structure.lattice
     crys_array_dict = {
         'frac_coords':structure.frac_coords,
