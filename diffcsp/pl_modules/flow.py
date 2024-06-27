@@ -138,7 +138,9 @@ class CSPFlow(BaseModule):
         return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
 
     @torch.no_grad()
-    def sample(self, batch, N):
+    def sample(self, batch, step_lr=None, N=None):
+        if N is None:
+            N = int(1 / step_lr)
 
         batch_size = batch.num_graphs
 
