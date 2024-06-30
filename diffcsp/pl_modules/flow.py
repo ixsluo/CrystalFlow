@@ -86,6 +86,19 @@ class CSPFlow(BaseModule):
         self.keep_lattice = self.hparams.cost_lattice < 1e-5
         self.keep_coords = self.hparams.cost_coord < 1e-5
 
+    def sample_lengths(self, num_atoms, batch_size):
+        loc = math.log(2)
+        scale = math.log(1)
+        lengths = torch.randn((batch_size, 3), device=self.device)
+        lengths = torch.exp(lengths * scale + loc)
+        lengths = num_atoms[:, None] * lengths
+        return lengths
+
+    def sample_angles(self, num_atoms, batch_size):
+        angles = torch.rand((batch_size, 3), device=self.device)  # [60, 120)
+        angles = angles * 60 + 60
+        return angles
+
     def forward(self, batch):
 
         batch_size = batch.num_graphs
@@ -111,7 +124,9 @@ class CSPFlow(BaseModule):
 
         # rand_l, rand_x = torch.randn_like(lattices), torch.randn_like(frac_coords)
 
-        l0 = torch.randn_like(lattices)
+        lengths0 = self.sample_lengths(batch.num_atoms, batch_size)
+        angles0 = self.sample_angles(batch.num_atoms, batch_size)
+        l0 = lattice_params_to_matrix_torch(lengths0, angles0)
         x0 = torch.rand_like(frac_coords)
 
         tar_l = lattices - l0
