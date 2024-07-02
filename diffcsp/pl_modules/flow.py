@@ -32,6 +32,7 @@ from diffcsp.common.data_utils import (
 )
 from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
+from diffcsp.pl_modules.hungarian import HungarianMatcher
 
 MAX_ATOMIC_NUM = 100
 
@@ -85,6 +86,9 @@ class CSPFlow(BaseModule):
         self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
         self.keep_lattice = self.hparams.cost_lattice < 1e-5
         self.keep_coords = self.hparams.cost_coord < 1e-5
+        self.ot = self.hparams.get("ot", False)
+        self.permute_l = HungarianMatcher("norm")
+        self.permute_f = HungarianMatcher("norm_mic")
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -124,16 +128,21 @@ class CSPFlow(BaseModule):
 
         # rand_l, rand_x = torch.randn_like(lattices), torch.randn_like(frac_coords)
 
-        lengths0 = self.sample_lengths(batch.num_atoms, batch_size)
-        angles0 = self.sample_angles(batch.num_atoms, batch_size)
-        l0 = lattice_params_to_matrix_torch(lengths0, angles0)
-        x0 = torch.rand_like(frac_coords)
+        # lengths0 = self.sample_lengths(batch.num_atoms, batch_size)
+        # angles0 = self.sample_angles(batch.num_atoms, batch_size)
+        # l0 = lattice_params_to_matrix_torch(lengths0, angles0)
+        l0 = torch.randn_like(lattices)
+        f0 = torch.rand_like(frac_coords)
+
+        if self.ot:
+            _, l0 = self.permute_l(lattices, l0)
+            _, f0 = self.permute_f(frac_coords, f0)
 
         tar_l = lattices - l0
-        tar_x = (frac_coords - x0) % 1 - 0.5
+        tar_f = (frac_coords - f0) % 1 - 0.5
 
         input_lattice = l0 + times[:, None, None] * tar_l
-        input_frac_coords = x0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_x
+        input_frac_coords = f0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_f
 
         if self.keep_coords:
             input_frac_coords = frac_coords
@@ -141,12 +150,12 @@ class CSPFlow(BaseModule):
         if self.keep_lattice:
             input_lattice = lattices
 
-        pred_l, pred_x = self.decoder(
+        pred_l, pred_f = self.decoder(
             time_emb, batch.atom_types, input_frac_coords, input_lattice, batch.num_atoms, batch.batch
         )
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
-        loss_coord = F.mse_loss(pred_x, tar_x)
+        loss_coord = F.mse_loss(pred_f, tar_f)
 
         loss = self.hparams.cost_lattice * loss_lattice + self.hparams.cost_coord * loss_coord
 
