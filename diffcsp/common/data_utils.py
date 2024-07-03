@@ -311,6 +311,41 @@ def lattice_matrix_to_params(matrix):
     alpha, beta, gamma = angles
     return a, b, c, alpha, beta, gamma
 
+
+@torch.no_grad()
+def lattice_matrix_to_params_torch(batch_lattice):
+    lengths = torch.sqrt(torch.sum(batch_lattice ** 2, dim=1))
+    raise NotImplementedError()
+
+
+@torch.no_grad()
+def lattice_polar_decompose_torch(lattices: torch.Tensor):
+    assert lattices.dim() == 3, "input must be batched lattices of shape (B,3,3)"
+    A, U = torch.linalg.eigh(lattices @ lattices.transpose(-1,-2))  # J = L^T @ L
+    # S = 1/2 U log(A) U^T
+    A = torch.diag_embed(A.log()) / 2
+    S = U @ A @ U.transpose(-1, -2)
+
+    k0 = S[:, 0, 1]
+    k1 = S[:, 0, 2]
+    k2 = S[:, 1, 2]
+    k3 = (S[:, 0, 0] - S[:, 1, 1]) / 2
+    k4 = (S[:, 0, 0] + S[:, 1, 1] - 2 * S[:, 2, 2]) / 6
+    k5 = (S[:, 0, 0] + S[:, 1, 1] + S[:, 2, 2]) / 3
+    k = torch.vstack([k0, k1, k2, k3, k4, k5]).transpose(-1, -2)
+    return k
+
+@torch.no_grad()
+def lattice_polar_build_torch(k):
+    assert k.dim() == 2, "input must be batched k of shape (B,6)"
+    S0 = torch.stack([k[:, 3] + k[:, 4] + k[:, 5], k[:, 0], k[:, 1]], dim=1)  # (B, 3)
+    S1 = torch.stack([k[:, 0], -k[:, 3] + k[:, 4] + k[:, 5], k[:, 2]], dim=1)  # (B, 3)
+    S2 = torch.stack([k[:, 1], k[:, 2], -2 * k[:, 4] + k[:, 5]], dim=1)  # (B, 3)
+    S = torch.stack([S0, S1, S2], dim=1)  # (B, 3, 3)
+    expS = torch.matrix_exp(S)  # (B, 3, 3)
+    return expS
+
+
 def lattices_to_params_shape(lattices):
 
     lengths = torch.sqrt(torch.sum(lattices ** 2, dim=-1))
