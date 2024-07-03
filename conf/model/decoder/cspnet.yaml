@@ -1,6 +1,7 @@
 _target_: diffcsp.pl_modules.cspnet.CSPNet
 hidden_dim: 512
 latent_dim: 0
+lattice_dim: 9
 max_atoms: 100
 num_layers: 6
 act_fn: silu

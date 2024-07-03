@@ -35,6 +35,7 @@ class CSPLayer(nn.Module):
         hidden_dim=128,
         act_fn=nn.SiLU(),
         dis_emb=None,
+        lattice_dim=9,
         ln=False,
         ip=True
     ):
@@ -42,11 +43,11 @@ class CSPLayer(nn.Module):
 
         self.dis_dim = 3
         self.dis_emb = dis_emb
-        self.ip = True
+        self.ip = ip
         if dis_emb is not None:
             self.dis_dim = dis_emb.dim
         self.edge_mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2 + 9 + self.dis_dim, hidden_dim),
+            nn.Linear(hidden_dim * 2 + lattice_dim + self.dis_dim, hidden_dim),
             act_fn,
             nn.Linear(hidden_dim, hidden_dim),
             act_fn)
@@ -71,7 +72,7 @@ class CSPLayer(nn.Module):
             lattice_ips = lattices @ lattices.transpose(-1,-2)
         else:
             lattice_ips = lattices
-        lattice_ips_flatten = lattice_ips.view(-1, 9)
+        lattice_ips_flatten = torch.flatten(lattice_ips, start_dim=1)
         lattice_ips_flatten_edges = lattice_ips_flatten[edge2graph]
         edges_input = torch.cat([hi, hj, lattice_ips_flatten_edges, frac_diff], dim=1)
         edge_features = self.edge_mlp(edges_input)
@@ -100,6 +101,7 @@ class CSPNet(nn.Module):
         self,
         hidden_dim = 128,
         latent_dim = 256,
+        lattice_dim = 9,
         num_layers = 4,
         max_atoms = 100,
         act_fn = 'silu',
@@ -131,11 +133,11 @@ class CSPNet(nn.Module):
             self.dis_emb = None
         for i in range(0, num_layers):
             self.add_module(
-                "csp_layer_%d" % i, CSPLayer(hidden_dim, self.act_fn, self.dis_emb, ln=ln, ip=ip)
+                "csp_layer_%d" % i, CSPLayer(hidden_dim, self.act_fn, self.dis_emb, lattice_dim=lattice_dim, ln=ln, ip=ip)
             )            
         self.num_layers = num_layers
         self.coord_out = nn.Linear(hidden_dim, 3, bias = False)
-        self.lattice_out = nn.Linear(hidden_dim, 9, bias = False)
+        self.lattice_out = nn.Linear(hidden_dim, lattice_dim, bias = False)
         self.cutoff = cutoff
         self.max_neighbors = max_neighbors
         self.pred_type = pred_type
@@ -287,7 +289,7 @@ class CSPNet(nn.Module):
             return self.scalar_out(graph_features)
 
         lattice_out = self.lattice_out(graph_features)
-        lattice_out = lattice_out.view(-1, 3, 3)
+        lattice_out = lattice_out.view(lattices.shape)
         if self.ip:
             lattice_out = torch.einsum('bij,bjk->bik', lattice_out, lattices)
         if self.pred_type:
