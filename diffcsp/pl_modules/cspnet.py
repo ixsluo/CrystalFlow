@@ -43,13 +43,13 @@ class RecSinusoidsEmbedding(nn.Module):
             torch.arange(self.n_millers),
             torch.arange(self.n_millers),
             torch.arange(self.n_millers),
-        )
+        ).to(torch.get_default_dtype())
         self.dim = 2 * self.millerindices.shape[0]
 
     def forward(self, frac_diff, lattice):
         cart_diff = torch.einsum("ei,eij->ej", frac_diff, lattice)  # (E,3)
         R = get_reciprocal_lattice_torch(lattice)
-        hb = torch.einsum('mi,mij->emj', self.millerindices.to(R.device), R)  # (E, M, 3)
+        hb = torch.einsum('mi,eij->emj', self.millerindices.to(R.device), R)  # (E, M, 3)
         hbX = torch.einsum("emj,ej->em", hb, cart_diff)  # (E, M)
         emb = torch.cat([hbX.cos(), hbX.sin()], dim=-1)  # (E, 2M)
         return emb
