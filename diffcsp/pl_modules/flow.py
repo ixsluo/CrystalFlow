@@ -26,6 +26,8 @@ from diffcsp.common.data_utils import (
     cart_to_frac_coords,
     frac_to_cart_coords,
     lattice_params_to_matrix_torch,
+    lattice_polar_build_torch,
+    lattice_polar_decompose_torch,
     lengths_angles_to_volume,
     mard,
     min_distance_sqr_pbc,
@@ -89,6 +91,7 @@ class CSPFlow(BaseModule):
         self.ot = self.hparams.get("ot", False)
         self.permute_l = HungarianMatcher("norm")
         self.permute_f = HungarianMatcher("norm_mic")
+        self.lattice_polar = self.hparams.get("lattice_polar", False)
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -103,55 +106,65 @@ class CSPFlow(BaseModule):
         angles = angles * 60 + 60
         return angles
 
+    def sample_lattice(self, batch_size):
+        l0 = torch.randn([batch_size, 3, 3], device=self.device)
+        return l0
+
+    def sample_lattice_polar(self, batch_size):
+        l0 = torch.randn([batch_size, 6], device=self.device)
+        l0[:, -1] = l0[:, -1] + 1
+        return
+
     def forward(self, batch):
 
         batch_size = batch.num_graphs
-        # times = self.beta_scheduler.uniform_sample_t(batch_size, self.device)
-        # time_emb = self.time_embedding(times)
         eps = 1e-3
         times = torch.rand(batch_size, device=self.device) * (1 - eps) + eps  # [eps, 1]
         time_emb = self.time_embedding(times)
 
-        # alphas_cumprod = self.beta_scheduler.alphas_cumprod[times]
-        # beta = self.beta_scheduler.betas[times]
+        # Build time stamp T and 0
+        lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
+        if self.lattice_polar:
+            lattices_rep_T = lattice_polar_decompose_torch(lattices_mat_T)
+            lattices_rep_0 = self.sample_lattice_polar(batch_size)
+        else:
+            lattices_rep_T = lattices_mat_T
+            lattices_rep_0 = self.sample_lattice(batch_size)
 
-        # c0 = torch.sqrt(alphas_cumprod)
-        # c1 = torch.sqrt(1. - alphas_cumprod)
-
-        # sigmas = self.sigma_scheduler.sigmas[times]
-        # sigmas_norm = self.sigma_scheduler.sigmas_norm[times]
-        # sigmas_per_atom = sigmas.repeat_interleave(batch.num_atoms)[:, None]
-        # sigmas_norm_per_atom = sigmas_norm.repeat_interleave(batch.num_atoms)[:, None]
-
-        lattices = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
         frac_coords = batch.frac_coords
-
-        # rand_l, rand_x = torch.randn_like(lattices), torch.randn_like(frac_coords)
-
-        # lengths0 = self.sample_lengths(batch.num_atoms, batch_size)
-        # angles0 = self.sample_angles(batch.num_atoms, batch_size)
-        # l0 = lattice_params_to_matrix_torch(lengths0, angles0)
-        l0 = torch.randn_like(lattices)
         f0 = torch.rand_like(frac_coords)
 
         if self.ot:
-            _, l0 = self.permute_l(lattices, l0)
+            _, lattices_rep_0 = self.permute_l(lattices_rep_T, lattices_rep_0)
             _, f0 = self.permute_f(frac_coords, f0)
 
-        tar_l = lattices - l0
+        # Build time stamp t
+        tar_l = lattices_rep_T - lattices_rep_0
         tar_f = (frac_coords - f0) % 1 - 0.5
 
-        input_lattice = l0 + times[:, None, None] * tar_l
+        input_lattice_rep = lattices_rep_0 + times[:, None, None] * tar_l
         input_frac_coords = f0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_f
 
+        if self.lattice_polar:
+            input_lattice_mat = lattice_polar_build_torch(input_lattice_rep)
+        else:
+            input_lattice_mat = input_lattice_rep
+
+        #
         if self.keep_coords:
             input_frac_coords = frac_coords
-
         if self.keep_lattice:
-            input_lattice = lattices
+            input_lattice_rep = lattices_rep_T
+            input_lattice_mat = lattices_mat_T
 
         pred_l, pred_f = self.decoder(
-            time_emb, batch.atom_types, input_frac_coords, input_lattice, batch.num_atoms, batch.batch
+            t=time_emb,
+            atom_types=batch.atom_types,
+            frac_coords=input_frac_coords,
+            lattices_rep=input_lattice_rep,
+            num_atoms=batch.num_atoms,
+            node2graph=batch.batch,
+            lattices_mat=input_lattice_mat,
         )
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
@@ -168,43 +181,74 @@ class CSPFlow(BaseModule):
 
         batch_size = batch.num_graphs
 
-        l_T = torch.randn([batch_size, 3, 3]).to(self.device)
+        # time stamp T
+        if self.lattice_polar:
+            l_T = self.sample_lattice_polar(batch_size)
+            lattices_mat_T = lattice_polar_build_torch(l_T)
+        else:
+            l_T = self.sample_lattice(batch_size)
+            lattices_mat_T = l_T
+
         x_T = torch.rand([batch.num_nodes, 3]).to(self.device)
 
+        #
         if self.keep_coords:
             x_T = batch.frac_coords
-
         if self.keep_lattice:
-            l_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
+            lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
+            if self.lattice_polar:
+                l_T = lattice_polar_decompose_torch(lattices_mat_T)
+            else:
+                l_T = lattices_mat_T
 
         traj = {
-            0: {'num_atoms': batch.num_atoms, 'atom_types': batch.atom_types, 'frac_coords': x_T % 1.0, 'lattices': l_T}
+            0: {
+                'num_atoms': batch.num_atoms,
+                'atom_types': batch.atom_types,
+                'frac_coords': x_T % 1.0,
+                'lattices': lattices_mat_T,
+            }
         }
+
+        l_t = l_T.clone().detach()
+        lattices_mat_t = lattices_mat_T.detach().clone()
+        x_t = x_T.clone().detach()
 
         for t in tqdm(range(1, N + 1)):
 
             times = torch.full((batch_size,), t, device=self.device) / N
-
             time_emb = self.time_embedding(times)
-
-            x_t = traj[t - 1]['frac_coords']
-            l_t = traj[t - 1]['lattices']
 
             if self.keep_coords:
                 x_t = x_T
             if self.keep_lattice:
                 l_t = l_T
+                lattices_mat_t = lattices_mat_T
 
-            pred_l, pred_x = self.decoder(time_emb, batch.atom_types, x_t, l_t, batch.num_atoms, batch.batch)
+            pred_l, pred_x = self.decoder(
+                t=time_emb,
+                atom_types=batch.atom_types,
+                frac_coords=x_t,
+                lattices_rep=l_t,
+                num_atoms=batch.num_atoms,
+                node2graph=batch.batch,
+                lattices_mat=lattices_mat_t,
+            )
 
             x_t = x_t + pred_x / N if not self.keep_coords else x_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
+            x_t = x_t % 1.0
+
+            if self.lattice_polar:
+                lattices_mat_t = lattice_polar_build_torch(l_t)
+            else:
+                lattices_mat_t = l_t
 
             traj[t] = {
                 'num_atoms': batch.num_atoms,
                 'atom_types': batch.atom_types,
-                'frac_coords': x_t % 1.0,
-                'lattices': l_t,
+                'frac_coords': x_t,
+                'lattices': lattices_mat_t,
             }
 
         traj_stack = {

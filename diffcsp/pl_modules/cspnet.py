@@ -8,12 +8,20 @@ from torch_scatter.composite import scatter_softmax
 from torch_geometric.utils import to_dense_adj, dense_to_sparse
 from einops import rearrange, repeat
 
-from diffcsp.common.data_utils import lattice_params_to_matrix_torch, get_pbc_distances, radius_graph_pbc, frac_to_cart_coords, repeat_blocks
+from diffcsp.common.data_utils import (
+    lattice_params_to_matrix_torch,
+    get_pbc_distances,
+    radius_graph_pbc,
+    frac_to_cart_coords,
+    repeat_blocks,
+    get_reciprocal_lattice_torch,
+)
 
-MAX_ATOMIC_NUM=100
+MAX_ATOMIC_NUM = 100
+
 
 class SinusoidsEmbedding(nn.Module):
-    def __init__(self, n_frequencies = 10, n_space = 3):
+    def __init__(self, n_frequencies=10, n_space=3):
         super().__init__()
         self.n_frequencies = n_frequencies
         self.n_space = n_space
@@ -27,70 +35,119 @@ class SinusoidsEmbedding(nn.Module):
         return emb
 
 
+class RecSinusoidsEmbedding(nn.Module):
+    def __init__(self, n_millers=10):
+        super().__init__()
+        self.n_millers = n_millers
+        self.millerindices = torch.cartesian_prod(
+            torch.arange(self.n_millerindex),
+            torch.arange(self.n_millerindex),
+            torch.arange(self.n_millerindex),
+        )
+        self.dim = 2 * self.millerindices.shape[0]
+
+    def forward(self, frac_diff, lattice):
+        cart_diff = torch.einsum("Ni,Nij->Nj", frac_diff, lattice)  # (E,3)
+        R = get_reciprocal_lattice_torch(lattice)
+        hb = torch.einsum('Mi,Eij->EMj', self.millerindices.to(R.device), R)  # (E, M, 3)
+        hbX = torch.einsum("EMj,Ej->EM", hb, cart_diff)  # (E, M)
+        emb = torch.cat([hbX.cos(), hbX.sin()], dim=-1)  # (E, 2M)
+        return emb
+
+
 class CSPLayer(nn.Module):
-    """ Message passing layer for cspnet."""
+    """Message passing layer for cspnet."""
 
     def __init__(
         self,
         hidden_dim=128,
+        lattice_dim=9,
         act_fn=nn.SiLU(),
         dis_emb=None,
-        lattice_dim=9,
+        rec_emb=None,
         ln=False,
-        ip=True
+        ip=True,
     ):
         super(CSPLayer, self).__init__()
 
         self.dis_dim = 3
         self.dis_emb = dis_emb
+        self.rec_emb = rec_emb
         self.ip = ip
+
         if dis_emb is not None:
             self.dis_dim = dis_emb.dim
+        if rec_emb is not None:
+            self.dis_dim += rec_emb.dim
+
         self.edge_mlp = nn.Sequential(
             nn.Linear(hidden_dim * 2 + lattice_dim + self.dis_dim, hidden_dim),
             act_fn,
             nn.Linear(hidden_dim, hidden_dim),
-            act_fn)
-        self.node_mlp = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
             act_fn,
-            nn.Linear(hidden_dim, hidden_dim),
-            act_fn)
+        )
+        self.node_mlp = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim), act_fn, nn.Linear(hidden_dim, hidden_dim), act_fn
+        )
         self.ln = ln
         if self.ln:
             self.layer_norm = nn.LayerNorm(hidden_dim)
-    
-    def edge_model(self, node_features, frac_coords, lattices, edge_index, edge2graph, frac_diff = None):
+
+    def edge_model(
+        self,
+        node_features,
+        frac_coords,
+        lattices_rep,
+        edge_index,
+        edge2graph,
+        frac_diff=None,
+        lattices_mat=None,
+    ):
 
         hi, hj = node_features[edge_index[0]], node_features[edge_index[1]]
+        inputs = [hi, hj]
+
         if frac_diff is None:
             xi, xj = frac_coords[edge_index[0]], frac_coords[edge_index[1]]
-            frac_diff = (xj - xi) % 1.
+            frac_diff = (xj - xi) % 1.0
+
+        if self.rec_emb is not None:
+            cart_diff = self.rec_emb(frac_diff, lattices_mat[edge2graph])
+            inputs.append(cart_diff)
+
         if self.dis_emb is not None:
             frac_diff = self.dis_emb(frac_diff)
+            inputs.append(frac_diff)
+
         if self.ip:
-            lattice_ips = lattices @ lattices.transpose(-1,-2)
+            lattice_ips = lattices_rep @ lattices_rep.transpose(-1, -2)
         else:
-            lattice_ips = lattices
+            lattice_ips = lattices_rep
         lattice_ips_flatten = torch.flatten(lattice_ips, start_dim=1)
         lattice_ips_flatten_edges = lattice_ips_flatten[edge2graph]
-        edges_input = torch.cat([hi, hj, lattice_ips_flatten_edges, frac_diff], dim=1)
+        inputs.append(lattice_ips_flatten_edges)
+
+        edges_input = torch.cat(inputs, dim=1)
         edge_features = self.edge_mlp(edges_input)
         return edge_features
 
     def node_model(self, node_features, edge_features, edge_index):
 
-        agg = scatter(edge_features, edge_index[0], dim = 0, reduce='mean', dim_size=node_features.shape[0])
-        agg = torch.cat([node_features, agg], dim = 1)
+        agg = scatter(edge_features, edge_index[0], dim=0, reduce='mean', dim_size=node_features.shape[0])
+        agg = torch.cat([node_features, agg], dim=1)
         out = self.node_mlp(agg)
         return out
 
-    def forward(self, node_features, frac_coords, lattices, edge_index, edge2graph, frac_diff = None):
+    def forward(
+        self, node_features, frac_coords, lattices_rep, edge_index, edge2graph, frac_diff=None, lattices_mat=None
+    ):
 
         node_input = node_features
         if self.ln:
             node_features = self.layer_norm(node_input)
-        edge_features = self.edge_model(node_features, frac_coords, lattices, edge_index, edge2graph, frac_diff)
+        edge_features = self.edge_model(
+            node_features, frac_coords, lattices_rep, edge_index, edge2graph, frac_diff, lattices_mat
+        )
         node_output = self.node_model(node_features, edge_features, edge_index)
         return node_input + node_output
 
@@ -99,22 +156,24 @@ class CSPNet(nn.Module):
 
     def __init__(
         self,
-        hidden_dim = 128,
-        latent_dim = 256,
-        lattice_dim = 9,
-        num_layers = 4,
-        max_atoms = 100,
-        act_fn = 'silu',
-        dis_emb = 'sin',
-        num_freqs = 10,
-        edge_style = 'fc',
-        cutoff = 6.0,
-        max_neighbors = 20,
-        ln = False,
-        ip = True,
-        smooth = False,
-        pred_type = False,
-        pred_scalar = False
+        hidden_dim=128,
+        latent_dim=256,
+        lattice_dim=9,
+        num_layers=4,
+        max_atoms=100,
+        act_fn='silu',
+        dis_emb='sin',
+        num_freqs=10,
+        rec_emb='none',
+        num_millers=5,
+        edge_style='fc',
+        cutoff=6.0,
+        max_neighbors=20,
+        ln=False,
+        ip=True,
+        smooth=False,
+        pred_type=False,
+        pred_scalar=False,
     ):
         super(CSPNet, self).__init__()
 
@@ -128,16 +187,33 @@ class CSPNet(nn.Module):
         if act_fn == 'silu':
             self.act_fn = nn.SiLU()
         if dis_emb == 'sin':
-            self.dis_emb = SinusoidsEmbedding(n_frequencies = num_freqs)
+            self.dis_emb = SinusoidsEmbedding(n_frequencies=num_freqs)
         elif dis_emb == 'none':
             self.dis_emb = None
+        else:
+            raise ValueError(f"Unknown fractional distance embedding: {dis_emb=}")
+        if rec_emb == "sin":
+            self.rec_emb = RecSinusoidsEmbedding(n_millers=num_millers)
+        elif rec_emb == "none":
+            self.rec_emb = None
+        else:
+            raise ValueError(f"Unknown reciprocal distance embedding: {rec_emb=}")
         for i in range(0, num_layers):
             self.add_module(
-                "csp_layer_%d" % i, CSPLayer(hidden_dim, self.act_fn, self.dis_emb, lattice_dim=lattice_dim, ln=ln, ip=ip)
-            )            
+                "csp_layer_%d" % i,
+                CSPLayer(
+                    hidden_dim=hidden_dim,
+                    lattice_dim=lattice_dim,
+                    act_fn=self.act_fn,
+                    dis_emb=self.dis_emb,
+                    rec_emb=self.rec_emb,
+                    ln=ln,
+                    ip=ip,
+                ),
+            )
         self.num_layers = num_layers
-        self.coord_out = nn.Linear(hidden_dim, 3, bias = False)
-        self.lattice_out = nn.Linear(hidden_dim, lattice_dim, bias = False)
+        self.coord_out = nn.Linear(hidden_dim, 3, bias=False)
+        self.lattice_out = nn.Linear(hidden_dim, lattice_dim, bias=False)
         self.cutoff = cutoff
         self.max_neighbors = max_neighbors
         self.pred_type = pred_type
@@ -161,9 +237,7 @@ class CSPNet(nn.Module):
         tensor_ordered = tensor_cat[reorder_idx]
         return tensor_ordered
 
-    def reorder_symmetric_edges(
-        self, edge_index, cell_offsets, neighbors, edge_vector
-    ):
+    def reorder_symmetric_edges(self, edge_index, cell_offsets, neighbors, edge_vector):
         """
         Reorder edges to make finding counter-directional edges easier.
 
@@ -182,11 +256,7 @@ class CSPNet(nn.Module):
         cell_earlier = (
             (cell_offsets[:, 0] < 0)
             | ((cell_offsets[:, 0] == 0) & (cell_offsets[:, 1] < 0))
-            | (
-                (cell_offsets[:, 0] == 0)
-                & (cell_offsets[:, 1] == 0)
-                & (cell_offsets[:, 2] < 0)
-            )
+            | ((cell_offsets[:, 0] == 0) & (cell_offsets[:, 1] == 0) & (cell_offsets[:, 2] < 0))
         )
         mask_same_atoms = edge_index[0] == edge_index[1]
         mask_same_atoms &= cell_earlier
@@ -210,9 +280,7 @@ class CSPNet(nn.Module):
             neighbors,
         )
         batch_edge = batch_edge[mask]
-        neighbors_new = 2 * torch.bincount(
-            batch_edge, minlength=neighbors.size(0)
-        )
+        neighbors_new = 2 * torch.bincount(batch_edge, minlength=neighbors.size(0))
 
         # Create indexing array
         edge_reorder_idx = repeat_blocks(
@@ -224,12 +292,8 @@ class CSPNet(nn.Module):
 
         # Reorder everything so the edges of every image are consecutive
         edge_index_new = edge_index_cat[:, edge_reorder_idx]
-        cell_offsets_new = self.select_symmetric_edges(
-            cell_offsets, mask, edge_reorder_idx, True
-        )
-        edge_vector_new = self.select_symmetric_edges(
-            edge_vector, mask, edge_reorder_idx, True
-        )
+        cell_offsets_new = self.select_symmetric_edges(cell_offsets, mask, edge_reorder_idx, True)
+        edge_vector_new = self.select_symmetric_edges(edge_vector, mask, edge_reorder_idx, True)
 
         return (
             edge_index_new,
@@ -241,30 +305,40 @@ class CSPNet(nn.Module):
     def gen_edges(self, num_atoms, frac_coords, lattices, node2graph):
 
         if self.edge_style == 'fc':
-            lis = [torch.ones(n,n, device=num_atoms.device) for n in num_atoms]
+            lis = [torch.ones(n, n, device=num_atoms.device) for n in num_atoms]
             fc_graph = torch.block_diag(*lis)
             fc_edges, _ = dense_to_sparse(fc_graph)
-            return fc_edges, (frac_coords[fc_edges[1]] - frac_coords[fc_edges[0]]) % 1.
+            return fc_edges, (frac_coords[fc_edges[1]] - frac_coords[fc_edges[0]]) % 1.0
         elif self.edge_style == 'knn':
             lattice_nodes = lattices[node2graph]
             cart_coords = torch.einsum('bi,bij->bj', frac_coords, lattice_nodes)
-            
+
             edge_index, to_jimages, num_bonds = radius_graph_pbc(
-                cart_coords, None, None, num_atoms, self.cutoff, self.max_neighbors,
-                device=num_atoms.device, lattices=lattices)
+                cart_coords,
+                None,
+                None,
+                num_atoms,
+                self.cutoff,
+                self.max_neighbors,
+                device=num_atoms.device,
+                lattices=lattices,
+            )
 
             j_index, i_index = edge_index
             distance_vectors = frac_coords[j_index] - frac_coords[i_index]
             distance_vectors += to_jimages.float()
 
-            edge_index_new, _, _, edge_vector_new = self.reorder_symmetric_edges(edge_index, to_jimages, num_bonds, distance_vectors)
+            edge_index_new, _, _, edge_vector_new = self.reorder_symmetric_edges(
+                edge_index, to_jimages, num_bonds, distance_vectors
+            )
 
             return edge_index_new, -edge_vector_new
-            
 
-    def forward(self, t, atom_types, frac_coords, lattices, num_atoms, node2graph):
+    def forward(self, t, atom_types, frac_coords, lattices_rep, num_atoms, node2graph, lattices_mat=None):
 
-        edges, frac_diff = self.gen_edges(num_atoms, frac_coords, lattices, node2graph)
+        if lattices_mat is None:
+            lattices_mat = lattices_rep
+        edges, frac_diff = self.gen_edges(num_atoms, frac_coords, lattices_mat, node2graph)
         edge2graph = node2graph[edges[0]]
         if self.smooth:
             node_features = self.node_embedding(atom_types)
@@ -276,25 +350,32 @@ class CSPNet(nn.Module):
         node_features = self.atom_latent_emb(node_features)
 
         for i in range(0, self.num_layers):
-            node_features = self._modules["csp_layer_%d" % i](node_features, frac_coords, lattices, edges, edge2graph, frac_diff = frac_diff)
+            node_features = self._modules["csp_layer_%d" % i](
+                node_features,
+                frac_coords,
+                lattices_rep,
+                edges,
+                edge2graph,
+                frac_diff=frac_diff,
+                lattices_mat=lattices_mat,
+            )
 
         if self.ln:
             node_features = self.final_layer_norm(node_features)
 
         coord_out = self.coord_out(node_features)
 
-        graph_features = scatter(node_features, node2graph, dim = 0, reduce = 'mean')
+        graph_features = scatter(node_features, node2graph, dim=0, reduce='mean')
 
         if self.pred_scalar:
             return self.scalar_out(graph_features)
 
         lattice_out = self.lattice_out(graph_features)
-        lattice_out = lattice_out.view(lattices.shape)
+        lattice_out = lattice_out.view(lattices_rep.shape)
         if self.ip:
-            lattice_out = torch.einsum('bij,bjk->bik', lattice_out, lattices)
+            lattice_out = torch.einsum('bij,bjk->bik', lattice_out, lattices_rep)
         if self.pred_type:
             type_out = self.type_out(node_features)
             return lattice_out, coord_out, type_out
 
         return lattice_out, coord_out
-

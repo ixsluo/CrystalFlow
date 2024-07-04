@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -344,6 +345,21 @@ def lattice_polar_build_torch(k):
     S = torch.stack([S0, S1, S2], dim=1)  # (B, 3, 3)
     expS = torch.matrix_exp(S)  # (B, 3, 3)
     return expS
+
+
+def get_reciprocal_lattice_torch(L):
+    V = torch.det(L)[:, None] + 1e-9  # (B, 1)
+    a0 = L[:, 0, :]  # (B, 3)
+    a1 = L[:, 1, :]
+    a2 = L[:, 2, :]
+    cross_a12 = torch.cross(a1, a2, dim=1)  # (B, 3)
+    cross_a20 = torch.cross(a2, a0, dim=1)
+    cross_a01 = torch.cross(a0, a1, dim=1)
+    b0 = (2 * math.pi * cross_a12 / V)[:, None, :]  # (B, 1, 3)
+    b1 = (2 * math.pi * cross_a20 / V)[:, None, :]  # (B, 1, 3)
+    b2 = (2 * math.pi * cross_a01 / V)[:, None, :]  # (B, 1, 3)
+    b = torch.cat([b0, b1, b2], dim=1)  # (B, 3, 3)
+    return b
 
 
 def lattices_to_params_shape(lattices):
