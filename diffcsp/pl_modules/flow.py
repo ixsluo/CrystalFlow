@@ -113,7 +113,7 @@ class CSPFlow(BaseModule):
     def sample_lattice_polar(self, batch_size):
         l0 = torch.randn([batch_size, 6], device=self.device)
         l0[:, -1] = l0[:, -1] + 1
-        return
+        return l0
 
     def forward(self, batch):
 
@@ -142,7 +142,8 @@ class CSPFlow(BaseModule):
         tar_l = lattices_rep_T - lattices_rep_0
         tar_f = (frac_coords - f0) % 1 - 0.5
 
-        input_lattice_rep = lattices_rep_0 + times[:, None, None] * tar_l
+        l_expand_dim = (slice(None),) + (None,) * (tar_l.dim() - 1)
+        input_lattice_rep = lattices_rep_0 + times[l_expand_dim] * tar_l
         input_frac_coords = f0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_f
 
         if self.lattice_polar:
