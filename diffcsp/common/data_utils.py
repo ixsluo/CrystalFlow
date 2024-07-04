@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import scipy
 import pandas as pd
 import networkx as nx
 import torch
@@ -317,6 +318,38 @@ def lattice_matrix_to_params(matrix):
 def lattice_matrix_to_params_torch(batch_lattice):
     lengths = torch.sqrt(torch.sum(batch_lattice ** 2, dim=1))
     raise NotImplementedError()
+
+
+def lattice_polar_decompose(lattice: np.ndarray):
+    assert lattice.ndim == 2
+    A, U = np.linalg.eigh(lattice @ lattice.T)
+    A, U = np.real(A), np.real(U)
+    A = np.diag(np.log(A)) / 2
+    S = U @ A @ U.T
+
+    k = np.array(
+        [
+            S[0, 1],
+            S[0, 2],
+            S[1, 2],
+            (S[0, 0] - S[1, 1]) / 2,
+            (S[0, 0] + S[1, 1] - 2 * S[2, 2]) / 6,
+            (S[0, 0] + S[1, 1] + S[2, 2]) / 3,
+        ]
+    )
+    return k
+
+def lattice_polar_build(k: np.ndarray):
+    assert k.ndim == 1
+    S = np.array(
+        [
+            [k[3] + k[4] + k[5], k[0], k[1]],
+            [k[0], -k[3] + k[4] + k[5], k[2]],
+            [k[1], k[2], -2 * k[4] + k[5]],
+        ]
+    )  # (3, 3)
+    expS = scipy.linalg.expm(S)  # (3, 3)
+    return expS
 
 
 @torch.no_grad()
