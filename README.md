@@ -10,18 +10,20 @@ Implementation codes for Crystal Structure Prediction by Joint Equivariant Diffu
 
 ### Dependencies and Setup
 
+Note: updated `python==3.11` and `pytorch>=2.0.0` and `hydra>=1.3`
+
 ```bash
 # sudo apt-get install gfortran libfftw3-dev pkg-config
-conda create -n diffcsp python=3.8.13 cudatoolkit=11.1 cmake openblas
+conda create -n diffcsp python=3.11.9
 conda activate diffcsp
-pip install torch==1.8.1+cu111 torchvision==0.9.1+cu111 torchaudio==0.8.1 -f https://download.pytorch.org/whl/torch_stable.html
-pip install torch_geometric==1.7.2 wandb
-pip install --no-index torch_scatter==2.0.8 torch_sparse==0.6.9 torch_cluster==1.5.9 torch_spline_conv==1.2.1 -f https://data.pyg.org/whl/torch-1.8.1+cu111.html
-pip install pytorch_lightning==1.3.8 torch==1.8.1 torchmetrics==0.7.3
-pip install einops pyarrow
-pip install hydra-core omegaconf python-dotenv p_tqdm notebook
-pip install pymatgen pyxtal==0.5.9 smact matminer "ruamel.yaml<0.18.0"
+pip install torch==2.3.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch_geometric==2.5.3
+pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.3.0+cu121.html
+pip install lightning==2.3.2
+pip install hydra-core omegaconf python-dotenv wandb rich
+pip install p_tqdm pymatgen pyxtal smact matminer einops
 pip install -e .
+mkdir log
 ```
 
 Rename the `.env.template` file into `.env` and specify the following variables.
@@ -29,7 +31,7 @@ Rename the `.env.template` file into `.env` and specify the following variables.
 ```
 PROJECT_ROOT: the absolute path of this repo
 HYDRA_JOBS: the absolute path to save hydra outputs
-WABDB_DIR: the absolute path to save wabdb outputs
+WANDB_DIR: the absolute path to save wabdb outputs
 ```
 
 example:

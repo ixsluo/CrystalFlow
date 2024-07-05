@@ -6,6 +6,7 @@
 
 import copy
 import math
+import logging
 from typing import Any, Dict
 
 import numpy as np
@@ -38,6 +39,8 @@ from diffcsp.pl_modules.hungarian import HungarianMatcher
 
 MAX_ATOMIC_NUM = 100
 
+metriclogger = logging.getLogger("metrics")
+
 
 class BaseModule(pl.LightningModule):
     def __init__(self, *args, **kwargs) -> None:
@@ -52,7 +55,7 @@ class BaseModule(pl.LightningModule):
         if not self.hparams.optim.use_lr_scheduler:
             return [opt]
         scheduler = hydra.utils.instantiate(self.hparams.optim.lr_scheduler, optimizer=opt)
-        return {"optimizer": opt, "lr_scheduler": scheduler, "monitor": "val_loss"}
+        return {"optimizer": opt, "lr_scheduler": {"scheduler": scheduler, "frequency": 5, "monitor": "val_loss"}}
 
 
 ### Model definition
@@ -275,10 +278,12 @@ class CSPFlow(BaseModule):
             on_step=True,
             on_epoch=True,
             prog_bar=True,
+            batch_size=batch.num_graphs,
         )
 
         if loss.isnan():
             return None
+
 
         return loss
 
@@ -293,6 +298,7 @@ class CSPFlow(BaseModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
+            batch_size=batch.num_graphs,
         )
         return loss
 
@@ -304,6 +310,7 @@ class CSPFlow(BaseModule):
 
         self.log_dict(
             log_dict,
+            batch_size=batch.num_graphs,
         )
         return loss
 
@@ -316,3 +323,18 @@ class CSPFlow(BaseModule):
         log_dict = {f'{prefix}_loss': loss, f'{prefix}_lattice_loss': loss_lattice, f'{prefix}_coord_loss': loss_coord}
 
         return log_dict, loss
+
+    def on_train_epoch_end(self) -> None:
+        metrics = {"epoch": self.current_epoch}
+        metrics.update({k: v.item() for k, v in self.trainer.logged_metrics.items()})
+        metriclogger.info(f"{metrics}")
+
+    def on_validation_epoch_end(self) -> None:
+        metrics = {"epoch": self.current_epoch}
+        metrics.update({k: v.item() for k, v in self.trainer.logged_metrics.items()})
+        metriclogger.info(f"{metrics}")
+
+    def on_test_epoch_end(self) -> None:
+        metrics = {"epoch": self.current_epoch}
+        metrics.update({k: v.item() for k, v in self.trainer.logged_metrics.items()})
+        metriclogger.info(f"{metrics}")
