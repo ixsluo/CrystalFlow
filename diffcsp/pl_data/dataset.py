@@ -64,7 +64,7 @@ class CrystDataset(Dataset):
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])
         (frac_coords, atom_types, lengths, angles, edge_indices,
-         to_jimages, num_atoms) = data_dict['graph_arrays']
+         to_jimages, num_atoms, lattice_polar) = data_dict['graph_arrays']
 
         # atom_coords are fractional coordinates
         # edge_index is incremented during batching
@@ -74,8 +74,8 @@ class CrystDataset(Dataset):
             atom_types=torch.LongTensor(atom_types),
             lengths=torch.Tensor(lengths).view(1, -1),
             angles=torch.Tensor(angles).view(1, -1),
-            edge_index=torch.LongTensor(
-                edge_indices.T).contiguous(),  # shape (2, num_edges)
+            lattice_polar=torch.Tensor(lattice_polar).view(1, -1),
+            edge_index=torch.LongTensor(edge_indices.T).contiguous(),  # shape (2, num_edges)
             to_jimages=torch.LongTensor(to_jimages),
             num_atoms=num_atoms,
             num_bonds=edge_indices.shape[0],
@@ -128,7 +128,7 @@ class TensorCrystDataset(Dataset):
         data_dict = self.cached_data[index]
 
         (frac_coords, atom_types, lengths, angles, edge_indices,
-         to_jimages, num_atoms) = data_dict['graph_arrays']
+         to_jimages, num_atoms, lattice_polar) = data_dict['graph_arrays']
 
         # atom_coords are fractional coordinates
         # edge_index is incremented during batching
@@ -138,8 +138,8 @@ class TensorCrystDataset(Dataset):
             atom_types=torch.LongTensor(atom_types),
             lengths=torch.Tensor(lengths).view(1, -1),
             angles=torch.Tensor(angles).view(1, -1),
-            edge_index=torch.LongTensor(
-                edge_indices.T).contiguous(),  # shape (2, num_edges)
+            lattice_polar=torch.Tensor(lattice_polar).view(1, -1),
+            edge_index=torch.LongTensor(edge_indices.T).contiguous(),  # shape (2, num_edges)
             to_jimages=torch.LongTensor(to_jimages),
             num_atoms=num_atoms,
             num_bonds=edge_indices.shape[0],
@@ -152,7 +152,7 @@ class TensorCrystDataset(Dataset):
 
 
 
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default", version_base="1.3")
 def main(cfg: omegaconf.DictConfig):
     from torch_geometric.data import Batch
     from diffcsp.common.data_utils import get_scaler_from_data_list
@@ -170,6 +170,7 @@ def main(cfg: omegaconf.DictConfig):
     dataset.scaler = scaler
     data_list = [dataset[i] for i in range(len(dataset))]
     batch = Batch.from_data_list(data_list)
+    print(batch)
     return batch
 
 

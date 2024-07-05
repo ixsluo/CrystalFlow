@@ -123,11 +123,12 @@ class CSPFlow(BaseModule):
         time_emb = self.time_embedding(times)
 
         # Build time stamp T and 0
-        lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
         if self.lattice_polar:
-            lattices_rep_T = lattice_polar_decompose_torch(lattices_mat_T)
+            lattices_rep_T = batch.lattice_polar
             lattices_rep_0 = self.sample_lattice_polar(batch_size)
+            lattices_mat_T = lattice_polar_build_torch(lattices_rep_T)
         else:
+            lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
             lattices_rep_T = lattices_mat_T
             lattices_rep_0 = self.sample_lattice(batch_size)
 
@@ -211,8 +212,8 @@ class CSPFlow(BaseModule):
             }
         }
 
+        lattices_mat_t = lattices_mat_T.clone().detach()
         l_t = l_T.clone().detach()
-        lattices_mat_t = lattices_mat_T.detach().clone()
         x_t = x_T.clone().detach()
 
         for t in tqdm(range(1, N + 1)):

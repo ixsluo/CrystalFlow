@@ -1,3 +1,4 @@
+import warnings
 import math
 import numpy as np
 import scipy
@@ -103,7 +104,9 @@ CrystalNN = local_env.CrystalNN(
 
 def build_crystal(crystal_str, niggli=True, primitive=False):
     """Build crystal from cif string."""
-    crystal = Structure.from_str(crystal_str, fmt='cif')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        crystal = Structure.from_str(crystal_str, fmt='cif')
 
     if primitive:
         crystal = crystal.get_primitive_structure()
@@ -194,6 +197,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     lattice_parameters = crystal.lattice.parameters
     lengths = lattice_parameters[:3]
     angles = lattice_parameters[3:]
+    lattice_polar = lattice_polar_decompose(crystal.lattice.matrix)
 
     assert np.allclose(crystal.lattice.matrix,
                        lattice_params_to_matrix(*lengths, *angles))
@@ -212,7 +216,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     to_jimages = np.array(to_jimages)
     num_atoms = atom_types.shape[0]
 
-    return frac_coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms
+    return frac_coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms, lattice_polar
 
 
 def abs_cap(val, max_abs_val=1):
@@ -1192,6 +1196,13 @@ def min_distance_sqr_pbc(cart_coords1, cart_coords2, lengths, angles,
     return return_list[0] if len(return_list) == 1 else return_list
 
 
+def array2tensor(array, dtype=torch.float):
+    if isinstance(array, torch.Tensor):
+        return array.clone().detach().to(dtype)
+    else:
+        return torch.tensor(array, dtype=dtype)
+
+
 class StandardScalerTorch(object):
     """Normalizes the targets of a dataset."""
 
@@ -1200,17 +1211,17 @@ class StandardScalerTorch(object):
         self.stds = stds
 
     def fit(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         self.means = torch.mean(X, dim=0)
         # https://github.com/pytorch/pytorch/issues/29372
         self.stds = torch.std(X, dim=0, unbiased=False) + EPSILON
 
     def transform(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         return (X - self.means) / self.stds
 
     def inverse_transform(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         return X * self.stds + self.means
 
     def match_device(self, tensor):
@@ -1320,7 +1331,7 @@ def add_scaled_lattice_prop(data_list, lattice_scale_method):
         # the indexes are brittle if more objects are returned
         lengths = graph_arrays[2]
         angles = graph_arrays[3]
-        num_atoms = graph_arrays[-1]
+        num_atoms = graph_arrays[6]
         assert lengths.shape[0] == angles.shape[0] == 3
         assert isinstance(num_atoms, int)
 
