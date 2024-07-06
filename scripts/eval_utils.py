@@ -111,7 +111,7 @@ def load_model(model_path, load_data=False, testing=True):
                     [int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts if 'last' not in ckpt.parts[-1]])
                 ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
         hparams = os.path.join(model_path, "hparams.yaml")
-        model = model.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
+        model = model.__class__.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
         try:
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
             model.scaler = torch.load(model_path / 'prop_scaler.pt')
