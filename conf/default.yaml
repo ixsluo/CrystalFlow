@@ -25,6 +25,7 @@ defaults:
   - model: diffusion
   - optim: default
   - train: default
+  - override hydra/job_logging: custom
   - _self_
 #    Decomment this parameter to get parallel job running
   # - override hydra/launcher: joblib

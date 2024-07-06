@@ -9,7 +9,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
-from torch_geometric.data import DataLoader
+from torch_geometric.loader import DataLoader
 
 from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.common.data_utils import get_scaler_from_data_list
@@ -149,7 +149,7 @@ class CrystDataModule(pl.LightningDataModule):
 
 
 
-@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default")
+@hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default", version_base="1.3")
 def main(cfg: omegaconf.DictConfig):
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(
         cfg.data.datamodule, _recursive_=False

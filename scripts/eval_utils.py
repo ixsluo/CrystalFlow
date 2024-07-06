@@ -5,7 +5,6 @@ import hydra
 
 from scipy.spatial.distance import pdist
 from scipy.spatial.distance import cdist
-from hydra.experimental import compose
 from hydra import initialize_config_dir
 from pathlib import Path
 
@@ -85,14 +84,14 @@ def get_model_path(eval_model_name):
 
 
 def load_config(model_path):
-    with initialize_config_dir(str(model_path)):
-        cfg = compose(config_name='hparams')
+    with initialize_config_dir(str(model_path), version_base="1.3"):
+        cfg = hydra.compose(config_name='hparams')
     return cfg
 
 
 def load_model(model_path, load_data=False, testing=True):
-    with initialize_config_dir(str(model_path)):
-        cfg = compose(config_name='hparams')
+    with initialize_config_dir(str(model_path), version_base="1.3"):
+        cfg = hydra.compose(config_name='hparams')
         model = hydra.utils.instantiate(
             cfg.model,
             optim=cfg.optim,
@@ -111,7 +110,7 @@ def load_model(model_path, load_data=False, testing=True):
                     [int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts if 'last' not in ckpt.parts[-1]])
                 ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
         hparams = os.path.join(model_path, "hparams.yaml")
-        model = model.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
+        model = model.__class__.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
         try:
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
             model.scaler = torch.load(model_path / 'prop_scaler.pt')

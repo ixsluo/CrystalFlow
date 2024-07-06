@@ -14,7 +14,9 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
+    TQDMProgressBar,
 )
+from pytorch_lightning.profilers import SimpleProfiler as Profiler
 from pytorch_lightning.loggers import WandbLogger
 
 from diffcsp.common.utils import log_hyperparameters, PROJECT_ROOT
@@ -50,7 +52,7 @@ def build_callbacks(cfg: DictConfig) -> List[Callback]:
         hydra.utils.log.info("Adding callback <ModelCheckpoint>")
         callbacks.append(
             ModelCheckpoint(
-                dirpath=Path(HydraConfig.get().run.dir),
+                dirpath=str(Path(HydraConfig.get().run.dir).absolute()),
                 monitor=cfg.train.monitor_metric,
                 mode=cfg.train.monitor_metric_mode,
                 save_top_k=cfg.train.model_checkpoints.save_top_k,
@@ -58,6 +60,12 @@ def build_callbacks(cfg: DictConfig) -> List[Callback]:
                 save_last=cfg.train.model_checkpoints.save_last,
             )
         )
+
+    callbacks.append(
+        TQDMProgressBar(
+            refresh_rate=cfg.logging.progress_bar_refresh_rate,
+        )
+    )
 
     return callbacks
 
@@ -68,6 +76,9 @@ def run(cfg: DictConfig) -> None:
 
     :param cfg: run configuration, defined by Hydra in /conf
     """
+
+    torch.set_float32_matmul_precision(cfg.train.float32_matmul_precision)
+
     if cfg.train.deterministic:
         seed_everything(cfg.train.random_seed)
 
@@ -142,6 +153,7 @@ def run(cfg: DictConfig) -> None:
         ckpt_epochs = np.array([int(ckpt.parts[-1].split('-')[0].split('=')[1]) for ckpt in ckpts])
         ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
         hydra.utils.log.info(f"found checkpoint: {ckpt}")
+        # ckpt = Path(ckpt)
     else:
         ckpt = None
           
@@ -152,15 +164,14 @@ def run(cfg: DictConfig) -> None:
         callbacks=callbacks,
         deterministic=cfg.train.deterministic,
         check_val_every_n_epoch=cfg.logging.val_check_interval,
-        progress_bar_refresh_rate=cfg.logging.progress_bar_refresh_rate,
-        resume_from_checkpoint=ckpt,
+        profiler=Profiler(dirpath=hydra_dir, filename="time_report"),
         **cfg.train.pl_trainer,
     )
 
     log_hyperparameters(trainer=trainer, model=model, cfg=cfg)
 
     hydra.utils.log.info("Starting training!")
-    trainer.fit(model=model, datamodule=datamodule)
+    trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt)
 
     hydra.utils.log.info("Starting testing!")
     trainer.test(datamodule=datamodule)
