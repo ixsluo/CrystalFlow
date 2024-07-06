@@ -1,4 +1,7 @@
+import warnings
+import math
 import numpy as np
+import scipy
 import pandas as pd
 import networkx as nx
 import torch
@@ -101,7 +104,9 @@ CrystalNN = local_env.CrystalNN(
 
 def build_crystal(crystal_str, niggli=True, primitive=False):
     """Build crystal from cif string."""
-    crystal = Structure.from_str(crystal_str, fmt='cif')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        crystal = Structure.from_str(crystal_str, fmt='cif')
 
     if primitive:
         crystal = crystal.get_primitive_structure()
@@ -192,6 +197,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     lattice_parameters = crystal.lattice.parameters
     lengths = lattice_parameters[:3]
     angles = lattice_parameters[3:]
+    lattice_polar = lattice_polar_decompose(crystal.lattice.matrix)
 
     assert np.allclose(crystal.lattice.matrix,
                        lattice_params_to_matrix(*lengths, *angles))
@@ -210,7 +216,7 @@ def build_crystal_graph(crystal, graph_method='crystalnn'):
     to_jimages = np.array(to_jimages)
     num_atoms = atom_types.shape[0]
 
-    return frac_coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms
+    return frac_coords, atom_types, lengths, angles, edge_indices, to_jimages, num_atoms, lattice_polar
 
 
 def abs_cap(val, max_abs_val=1):
@@ -310,6 +316,88 @@ def lattice_matrix_to_params(matrix):
     a, b, c = lengths
     alpha, beta, gamma = angles
     return a, b, c, alpha, beta, gamma
+
+
+@torch.no_grad()
+def lattice_matrix_to_params_torch(batch_lattice):
+    lengths = torch.sqrt(torch.sum(batch_lattice ** 2, dim=1))
+    raise NotImplementedError()
+
+
+def lattice_polar_decompose(lattice: np.ndarray):
+    assert lattice.ndim == 2
+    A, U = np.linalg.eigh(lattice @ lattice.T)
+    A, U = np.real(A), np.real(U)
+    A = np.diag(np.log(A)) / 2
+    S = U @ A @ U.T
+
+    k = np.array(
+        [
+            S[0, 1],
+            S[0, 2],
+            S[1, 2],
+            (S[0, 0] - S[1, 1]) / 2,
+            (S[0, 0] + S[1, 1] - 2 * S[2, 2]) / 6,
+            (S[0, 0] + S[1, 1] + S[2, 2]) / 3,
+        ]
+    )
+    return k
+
+def lattice_polar_build(k: np.ndarray):
+    assert k.ndim == 1
+    S = np.array(
+        [
+            [k[3] + k[4] + k[5], k[0], k[1]],
+            [k[0], -k[3] + k[4] + k[5], k[2]],
+            [k[1], k[2], -2 * k[4] + k[5]],
+        ]
+    )  # (3, 3)
+    expS = scipy.linalg.expm(S)  # (3, 3)
+    return expS
+
+
+@torch.no_grad()
+def lattice_polar_decompose_torch(lattices: torch.Tensor):
+    assert lattices.dim() == 3, "input must be batched lattices of shape (B,3,3)"
+    A, U = torch.linalg.eigh(lattices @ lattices.transpose(-1,-2))  # J = L^T @ L
+    # S = 1/2 U log(A) U^T
+    A = torch.diag_embed(A.log()) / 2
+    S = U @ A @ U.transpose(-1, -2)
+
+    k0 = S[:, 0, 1]
+    k1 = S[:, 0, 2]
+    k2 = S[:, 1, 2]
+    k3 = (S[:, 0, 0] - S[:, 1, 1]) / 2
+    k4 = (S[:, 0, 0] + S[:, 1, 1] - 2 * S[:, 2, 2]) / 6
+    k5 = (S[:, 0, 0] + S[:, 1, 1] + S[:, 2, 2]) / 3
+    k = torch.vstack([k0, k1, k2, k3, k4, k5]).transpose(-1, -2)
+    return k
+
+@torch.no_grad()
+def lattice_polar_build_torch(k):
+    assert k.dim() == 2, "input must be batched k of shape (B,6)"
+    S0 = torch.stack([k[:, 3] + k[:, 4] + k[:, 5], k[:, 0], k[:, 1]], dim=1)  # (B, 3)
+    S1 = torch.stack([k[:, 0], -k[:, 3] + k[:, 4] + k[:, 5], k[:, 2]], dim=1)  # (B, 3)
+    S2 = torch.stack([k[:, 1], k[:, 2], -2 * k[:, 4] + k[:, 5]], dim=1)  # (B, 3)
+    S = torch.stack([S0, S1, S2], dim=1)  # (B, 3, 3)
+    expS = torch.matrix_exp(S)  # (B, 3, 3)
+    return expS
+
+
+def get_reciprocal_lattice_torch(L):
+    V = torch.det(L)[:, None] + 1e-9  # (B, 1)
+    a0 = L[:, 0, :]  # (B, 3)
+    a1 = L[:, 1, :]
+    a2 = L[:, 2, :]
+    cross_a12 = torch.cross(a1, a2, dim=1)  # (B, 3)
+    cross_a20 = torch.cross(a2, a0, dim=1)
+    cross_a01 = torch.cross(a0, a1, dim=1)
+    b0 = (2 * math.pi * cross_a12 / V)[:, None, :]  # (B, 1, 3)
+    b1 = (2 * math.pi * cross_a20 / V)[:, None, :]  # (B, 1, 3)
+    b2 = (2 * math.pi * cross_a01 / V)[:, None, :]  # (B, 1, 3)
+    b = torch.cat([b0, b1, b2], dim=1)  # (B, 3, 3)
+    return b
+
 
 def lattices_to_params_shape(lattices):
 
@@ -1108,6 +1196,13 @@ def min_distance_sqr_pbc(cart_coords1, cart_coords2, lengths, angles,
     return return_list[0] if len(return_list) == 1 else return_list
 
 
+def array2tensor(array, dtype=torch.float):
+    if isinstance(array, torch.Tensor):
+        return array.clone().detach().to(dtype)
+    else:
+        return torch.tensor(array, dtype=dtype)
+
+
 class StandardScalerTorch(object):
     """Normalizes the targets of a dataset."""
 
@@ -1116,17 +1211,17 @@ class StandardScalerTorch(object):
         self.stds = stds
 
     def fit(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         self.means = torch.mean(X, dim=0)
         # https://github.com/pytorch/pytorch/issues/29372
         self.stds = torch.std(X, dim=0, unbiased=False) + EPSILON
 
     def transform(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         return (X - self.means) / self.stds
 
     def inverse_transform(self, X):
-        X = torch.tensor(X, dtype=torch.float)
+        X = array2tensor(X, dtype=torch.float)
         return X * self.stds + self.means
 
     def match_device(self, tensor):
@@ -1236,7 +1331,7 @@ def add_scaled_lattice_prop(data_list, lattice_scale_method):
         # the indexes are brittle if more objects are returned
         lengths = graph_arrays[2]
         angles = graph_arrays[3]
-        num_atoms = graph_arrays[-1]
+        num_atoms = graph_arrays[6]
         assert lengths.shape[0] == angles.shape[0] == 3
         assert isinstance(num_atoms, int)
 

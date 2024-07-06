@@ -391,7 +391,7 @@ def main(args):
     if 'opt' in args.tasks:
         opt_file_path = get_file_paths(args.root_path, 'opt', args.label)
         crys_array_list, _ = get_crystal_array_list(opt_file_path)
-        opt_crys = p_map(lambda x: Crystal(x), crys_array_list)
+        opt_crys = p_map(lambda x: Crystal(x), crys_array_list, num_cpus=args.njobs)
 
         opt_evaluator = OptEval(opt_crys, eval_model_name=eval_model_name)
         opt_metrics = opt_evaluator.get_metrics()
@@ -402,14 +402,14 @@ def main(args):
         gen_file_path = get_file_paths(args.root_path, 'gen', args.label)
         recon_file_path = get_file_paths(args.root_path, 'recon', args.label)
         crys_array_list, _ = get_crystal_array_list(gen_file_path, batch_idx = -2)
-        gen_crys = p_map(lambda x: Crystal(x), crys_array_list)
+        gen_crys = p_map(lambda x: Crystal(x), crys_array_list, num_cpus=args.njobs)
         if args.gt_file != '':
             csv = pd.read_csv(args.gt_file)
-            gt_crys = p_map(get_gt_crys_ori, csv['cif'])
+            gt_crys = p_map(get_gt_crys_ori, csv['cif'], num_cpus=args.njobs)
         else:
             _, true_crystal_array_list = get_crystal_array_list(
                 recon_file_path)
-            gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list)
+            gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list, num_cpus=args.njobs)
         gen_evaluator = GenEval(
             gen_crys, gt_crys, eval_model_name=eval_model_name)
         gen_metrics = gen_evaluator.get_metrics()
@@ -426,15 +426,15 @@ def main(args):
             csv = pd.read_csv(args.gt_file)
             gt_crys = p_map(get_gt_crys_ori, csv['cif'])
         else:
-            gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list)
+            gt_crys = p_map(lambda x: Crystal(x), true_crystal_array_list, num_cpus=args.njobs)
 
         if not args.multi_eval:
-            pred_crys = p_map(lambda x: Crystal(x), crys_array_list)
+            pred_crys = p_map(lambda x: Crystal(x), crys_array_list, num_cpus=args.njobs)
         else:
             pred_crys = []
             for i in range(len(crys_array_list)):
                 print(f"Processing batch {i}")
-                pred_crys.append(p_map(lambda x: Crystal(x), crys_array_list[i]))   
+                pred_crys.append(p_map(lambda x: Crystal(x), crys_array_list[i], num_cpus=args.njobs))
 
         if args.multi_eval:
             rec_evaluator = RecEvalBatch(pred_crys, gt_crys)
@@ -443,9 +443,12 @@ def main(args):
 
         recon_metrics = rec_evaluator.get_metrics()
 
+        if hasattr(rec_evaluator, "all_rms_dis"):
+            all_metrics["all_rms_dis"] = rec_evaluator.all_rms_dis.tolist()
+
         all_metrics.update(recon_metrics)
 
-   
+
 
     print(all_metrics)
 
@@ -479,5 +482,6 @@ if __name__ == '__main__':
     parser.add_argument('--tasks', nargs='+', default=['csp'])
     parser.add_argument('--gt_file',default='')
     parser.add_argument('--multi_eval',action='store_true')
+    parser.add_argument('-j', '--njobs', default=32, type=int)
     args = parser.parse_args()
     main(args)
