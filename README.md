@@ -21,7 +21,7 @@ pip install torch_geometric==2.5.3
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.3.0+cu121.html
 pip install lightning==2.3.2
 pip install hydra-core omegaconf python-dotenv wandb rich
-pip install p_tqdm pymatgen pyxtal smact matminer einops
+pip install p_tqdm pymatgen pyxtal smact matminer einops chemparse
 pip install -e .
 mkdir log
 ```

@@ -1,25 +1,26 @@
-import time
 import argparse
-import torch
-
-from tqdm import tqdm
-from torch.optim import Adam
+import os
+import time
 from pathlib import Path
-from types import SimpleNamespace
-from torch_geometric.data import Data, Batch, DataLoader
-from torch.utils.data import Dataset
-from eval_utils import load_model, lattices_to_params_shape, get_crystals_list
 
-from pymatgen.core.structure import Structure
-from pymatgen.core.lattice import Lattice
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-from pymatgen.io.cif import CifWriter
-from pyxtal.symmetry import Group
 import chemparse
 import numpy as np
+import pandas as pd
+import torch
 from p_tqdm import p_map
+from pymatgen.core.lattice import Lattice
+from pymatgen.core.structure import Structure
+from pymatgen.io.cif import CifWriter
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from pyxtal.symmetry import Group
+from torch.optim import Adam
+from torch.utils.data import Dataset
+from torch_geometric.data import Batch, Data
+from torch_geometric.loader import DataLoader
+from tqdm import tqdm
 
-import os
+# LOCALFOLDER
+from eval_utils import get_crystals_list, lattices_to_params_shape, load_model  # isort: skip
 
 chemical_symbols = [
     # 0
@@ -45,7 +46,7 @@ chemical_symbols = [
     'Fr', 'Ra', 'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk',
     'Cf', 'Es', 'Fm', 'Md', 'No', 'Lr',
     'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
-    'Lv', 'Ts', 'Og']
+    'Lv', 'Ts', 'Og']  # fmt: skip
 
 def diffusion(loader, model, step_lr):
 
@@ -114,48 +115,86 @@ def get_pymatgen(crystal_array):
     except:
         return None
 
+
+def load_formula_tabular_file(formula_file):
+    with open(formula_file, "r") as f:
+        line = f.readline().split()
+        if 'formula' not in line:
+            print("First line inferred NOT a HEADER, assume no header line")
+            header = None
+        else:
+            header = 0
+    formula_tabular = pd.read_csv(formula_file, sep=r'\s+', header=header)
+    if header is None:
+        print("Assume first column as formulas")
+        formula_list = formula_tabular[0].astype(str).tolist()
+        if len(formula_tabular.columns) > 1:
+            print("Assume second column as num_evals")
+            num_evals_list = formula_tabular[1].astype(int).tolist()
+        else:
+            num_evals_list = None
+    else:
+        formula_list = formula_tabular["formula"].tolist()
+        if "num_evals" in formula_tabular.columns:
+            num_evals_list = formula_tabular["num_evals"].astype(int).tolist()
+        else:
+            num_evals_list = None
+    return formula_list, num_evals_list
+
+
 def main(args):
-    # load_data if do reconstruction.
+    print("Loading model...")
     model_path = Path(args.model_path)
     model, _, cfg = load_model(
         model_path, load_data=False)
-
     if torch.cuda.is_available():
         model.to('cuda')
 
-    tar_dir = os.path.join(args.save_path, args.formula)
-    os.makedirs(tar_dir, exist_ok=True)
+    if args.formula_file is not None:
+        print(f"Trying reading sampling formula and num_evals from '{args.formula_file}'...")
+        formula_list, num_evals_list = load_formula_tabular_file(args.formula_file)
+        if num_evals_list is None:
+            num_evals_list = [args.num_evals for _ in formula_list]
+    else:
+        formula_list = [args.formula]
+        num_evals_list = [args.num_evals]
 
-    print('Evaluate the diffusion model.')
+    for formula, num_evals in zip(formula_list, num_evals_list):
+        tar_dir = os.path.join(args.save_path, formula)
+        os.makedirs(tar_dir, exist_ok=True)
 
-    test_set = SampleDataset(args.formula, args.num_evals)
-    test_loader = DataLoader(test_set, batch_size = min(args.batch_size, args.num_evals))
+        print(f'Sampling {formula} times {num_evals}...')
 
-    start_time = time.time()
-    (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(test_loader, model, args.step_lr)
+        test_set = SampleDataset(formula, num_evals)
+        test_loader = DataLoader(test_set, batch_size = min(args.batch_size, num_evals))
 
-    crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+        start_time = time.time()
+        (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(test_loader, model, args.step_lr)
 
-    strcuture_list = p_map(get_pymatgen, crystal_list)
+        crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
 
-    for i,structure in enumerate(strcuture_list):
-        tar_file = os.path.join(tar_dir, f"{args.formula}_{i+1}.cif")
-        if structure is not None:
-            writer = CifWriter(structure)
-            writer.write_file(tar_file)
-        else:
-            print(f"{i+1} Error Structure.")
-      
+        strcuture_list = p_map(get_pymatgen, crystal_list)
+
+        for i,structure in enumerate(strcuture_list):
+            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
+            if structure is not None:
+                writer = CifWriter(structure)
+                writer.write_file(tar_file)
+            else:
+                print(f"{i+1} Error Structure.")
+
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', required=True)
-    parser.add_argument('--save_path', required=True)
-    parser.add_argument('--formula', required=True)
-    parser.add_argument('--num_evals', default=1, type=int)
-    parser.add_argument('--batch_size', default=500, type=int)
-    parser.add_argument('--step_lr', default=1e-5, type=float)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
+    parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
+    formula_group = parser.add_mutually_exclusive_group(required=True)
+    formula_group.add_argument('-f', '--formula')
+    formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula` and `num_evals`(optional), split by WHITESPACE characters.")  # fmt: skip
+    parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
+    parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split sampling times of each formula.")
+    parser.add_argument('--step_lr', default=1e-5, type=float, help="step_lr for SDE/ODE.")
 
     args = parser.parse_args()
 
