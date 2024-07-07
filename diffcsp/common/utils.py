@@ -94,4 +94,4 @@ assert (
     PROJECT_ROOT.exists()
 ), "You must configure the PROJECT_ROOT environment variable in a .env file!"
 
-os.chdir(PROJECT_ROOT)
+# os.chdir(PROJECT_ROOT)
