@@ -212,9 +212,8 @@ def smact_validity(comp, count,
 
 def structure_validity(crystal, cutoff=0.5):
     dist_mat = crystal.distance_matrix
-    # Pad diagonal with a large number
-    dist_mat = dist_mat + np.diag(
-        np.ones(dist_mat.shape[0]) * (cutoff + 10.))
+    # Pad diagonal with minimal pbc
+    dist_mat = dist_mat + np.diag(np.ones(dist_mat.shape[0]) * min(crystal.abc))
     if dist_mat.min() < cutoff or crystal.volume < 0.1:
         return False
     else:

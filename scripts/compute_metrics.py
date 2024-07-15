@@ -6,6 +6,7 @@ import sys
 import warnings
 from collections import Counter
 from pathlib import Path
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,7 @@ from pymatgen.core.structure import Structure
 from pyxtal import pyxtal
 from scipy.stats import wasserstein_distance
 from tqdm import tqdm
+# from joblib import Parallel, delayed
 
 sys.path.append('.')
 
@@ -52,7 +54,7 @@ COV_Cutoffs = {
 
 class Crystal(object):
 
-    def __init__(self, crys_array_dict):
+    def __init__(self, crys_array_dict, compute_valid=True, compute_fp=True, ignore_smact=False):
         self.frac_coords = crys_array_dict['frac_coords']
         self.atom_types = crys_array_dict['atom_types']
         self.lengths = crys_array_dict['lengths']
@@ -64,8 +66,17 @@ class Crystal(object):
 
         self.get_structure()
         self.get_composition()
-        self.get_validity()
-        self.get_fingerprints()
+
+        self.ignore_smact = ignore_smact
+        if compute_valid:
+            self.get_validity()
+        else:
+            self.valid = self.comp_valid = self.struct_valid = True
+
+        if compute_fp:
+            self.get_fingerprints()
+        else:
+            self.comp_fp = self.struct_fp = None
 
 
     def get_structure(self):
@@ -74,7 +85,7 @@ class Crystal(object):
             self.invalid_reason = 'non_positive_lattice'
         if np.isnan(self.lengths).any() or np.isnan(self.angles).any() or  np.isnan(self.frac_coords).any():
             self.constructed = False
-            self.invalid_reason = 'nan_value'            
+            self.invalid_reason = 'nan_value'
         else:
             try:
                 self.structure = Structure(
@@ -100,7 +111,7 @@ class Crystal(object):
         self.comps = tuple(counts.astype('int').tolist())
 
     def get_validity(self):
-        self.comp_valid = smact_validity(self.elems, self.comps)
+        self.comp_valid = smact_validity(self.elems, self.comps) if not self.ignore_smact else True
         if self.constructed:
             self.struct_valid = structure_validity(self.structure)
         else:
@@ -124,33 +135,63 @@ class Crystal(object):
         self.struct_fp = np.array(site_fps).mean(axis=0)
 
 
+def _is_odd(structure: Structure):
+    lengths = np.array(structure.lattice.abc)
+    angles = np.array(structure.lattice.angles)
+    if any(angles < 10) or any(angles > 170):
+        return True
+    elif any(lengths / np.power(len(structure), 1 / 3) > 20):
+        return True
+    elif any(lengths / np.power(len(structure), 1 / 3) < 0.1):
+        return True
+    elif not (0.1 < (structure.volume / len(structure)) < 100):
+        return True
+    return False
+
+
+def get_rms_dist(pred, gt, is_valid, matcher):
+    if _is_odd(pred.structure):
+        return None
+    if not is_valid:
+        return None
+    try:
+        rms_dist = matcher.get_rms_dist(
+            pred.structure, gt.structure)
+        rms_dist = None if rms_dist is None else rms_dist[0]
+        return rms_dist
+    except Exception:
+        return None
+
+
 class RecEval(object):
 
-    def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3):
+    def __init__(self, pred_crys, gt_crys, stol=0.5, angle_tol=10, ltol=0.3, njobs=1):
         assert len(pred_crys) == len(gt_crys)
         self.matcher = StructureMatcher(
             stol=stol, angle_tol=angle_tol, ltol=ltol)
         self.preds = pred_crys
         self.gts = gt_crys
+        self.njobs = njobs
 
     def get_match_rate_and_rms(self):
-        def process_one(pred, gt, is_valid):
-            if not is_valid:
-                return None
-            try:
-                rms_dist = self.matcher.get_rms_dist(
-                    pred.structure, gt.structure)
-                rms_dist = None if rms_dist is None else rms_dist[0]
-                return rms_dist
-            except Exception:
-                return None
-        validity = [c1.valid and c2.valid for c1,c2 in zip(self.preds, self.gts)]
+        validity = [c1.valid and c2.valid for c1, c2 in zip(self.preds, self.gts)]
 
-        rms_dists = []
-        for i in tqdm(range(len(self.preds))):
-            rms_dists.append(process_one(
-                self.preds[i], self.gts[i], validity[i]))
+        rms_dists = p_map(
+            partial(get_rms_dist, matcher=self.matcher),
+            self.preds,
+            self.gts,
+            validity,
+            num_cpus=self.njobs,
+            ncols=79,
+        )
+        self.rms_dists = rms_dists
+
+        # rms_dists = []
+        # for i in tqdm(range(len(self.preds)), ncols=79):
+        #     rms_dists.append(process_one(
+        #         self.preds[i], self.gts[i], validity[i]))
         rms_dists = np.array(rms_dists)
+
         match_rate = sum(rms_dists != None) / len(self.preds)
         mean_rms_dist = rms_dists[rms_dists != None].mean()
         return {'match_rate': match_rate,
@@ -196,12 +237,14 @@ class RecEvalBatch(object):
                 rms_dists.append(None)
             else:
                 rms_dists.append(np.min(tmp_rms_dists))
-            
+
         rms_dists = np.array(rms_dists)
         match_rate = sum(rms_dists != None) / len(self.preds[0])
         mean_rms_dist = rms_dists[rms_dists != None].mean()
-        return {'match_rate': match_rate,
-                'rms_dist': mean_rms_dist}    
+        return {
+            'match_rate': match_rate,
+            'rms_dist': mean_rms_dist
+        }
 
     def get_metrics(self):
         metrics = {}
@@ -317,7 +360,7 @@ class OptEval(object):
 
 
 def get_file_paths(root_path, task, label='', suffix='pt'):
-    if args.label == '':
+    if label == '':
         out_name = f'eval_{task}.{suffix}'
     else:
         out_name = f'eval_{task}_{label}.{suffix}'
