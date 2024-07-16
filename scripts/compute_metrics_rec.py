@@ -50,12 +50,12 @@ def main(args):
         csv = pd.read_csv(args.gt_file)
         gt_crys = p_map(get_gt_crys_ori, csv['cif'], num_cpus=args.njobs, ncols=79)
     else:
-        gt_crys = p_map(lambda x: Crystal(x, False, False), true_crystal_array_list, num_cpus=args.njobs, ncols=79)
+        gt_crys = p_map(lambda x: Crystal(x, True, False, True), true_crystal_array_list, num_cpus=args.njobs, ncols=79)
 
     print("Parsing batched predicted structures...")
     batched_rms_dists = []
     for ibatch, crys_array_list in enumerate(batched_crys_array_list):
-        pred_crys = p_map(lambda x: Crystal(x, False, False), crys_array_list, num_cpus=args.njobs, ncols=79, desc=f"{ibatch=}")
+        pred_crys = p_map(lambda x: Crystal(x, True, False, True), crys_array_list, num_cpus=args.njobs, ncols=79, desc=f"{ibatch=}")
         rec_evaluator = RecEval(pred_crys, gt_crys, njobs=args.njobs)
         _ = rec_evaluator.get_metrics()
         rms_dists = rec_evaluator.rms_dists
