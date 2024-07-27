@@ -113,6 +113,7 @@ def load_model(model_path, load_data=False, testing=True):
         model = model.__class__.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
         try:
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
+            model.scalers = torch.load(model_path / 'prop_scalers.pt')
             model.scaler = torch.load(model_path / 'prop_scaler.pt')
         except:
             pass
