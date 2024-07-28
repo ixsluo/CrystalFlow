@@ -149,8 +149,10 @@ def _is_odd(structure: Structure):
     return False
 
 
-def get_rms_dist(pred, gt, is_valid, matcher):
-    if _is_odd(pred.structure):
+def get_rms_dist(pred: Crystal, gt, is_valid, matcher):
+    if not pred.constructed:
+        return None
+    elif _is_odd(pred.structure):
         return None
     if not is_valid:
         return None
