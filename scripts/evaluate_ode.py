@@ -70,7 +70,7 @@ def main(args):
     # load_data if do reconstruction.
     model_path = Path(args.model_path)
     model, test_loader, cfg = load_model(
-        model_path, load_data=True)
+        model_path, load_data=True, test_bs=args.test_bs)
 
     if torch.cuda.is_available():
         model.to('cuda')
@@ -79,10 +79,16 @@ def main(args):
     print('Evaluate the diffusion model.')
 
     t_span = get_t_span(args.ode_scheduler, args.ode_int_steps)
+    if args.integrate_sequence in ["lf", "lattice_first"]:
+        integrate_sequence = "lattice_first"
+    elif args.integrate_sequence in ["cf", "coords_first"]:
+        integrate_sequence = "coords_first"
+    else:
+        raise NotImplementedError("Unknown integrate sequence")
 
     start_time = time.time()
     (frac_coords, atom_types, lattices, lengths, angles, num_atoms, input_data_batch) = diffusion(
-        test_loader, model, args.num_evals, t_span, args.solver, args.integrate_sequence)
+        test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence)
 
     if args.label == '':
         diff_out_name = 'eval_diff.pt'
@@ -112,8 +118,9 @@ if __name__ == '__main__':
         'ieuler', 'implicit_euler',
         # 'alf', 'AsynchronousLeapfrog'
         ], default="euler", help="ODE integrate solver, default: euler")
-    parser.add_argument('-seq', "--integrate_sequence", choices=['lattice_first', 'coords_first'], default='lattice_first', help="Which to integrate first, default: lattice_first")
+    parser.add_argument('-seq', "--integrate_sequence", choices=['lf', 'lattice_first', 'cf', 'coords_first'], default='lf', help="Which to integrate first, default: lattice_first")
     parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample, default: 1")
+    parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize, default: None")
     parser.add_argument('--label', default='')
     args = parser.parse_args()
     main(args)
