@@ -8,6 +8,9 @@ import copy
 import math
 import logging
 from typing import Any, Dict
+from functools import partial, partialmethod, wraps
+from inspect import getfullargspec
+from operator import itemgetter
 
 import numpy as np
 import omegaconf
@@ -36,6 +39,7 @@ from diffcsp.common.data_utils import (
 from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
 from diffcsp.pl_modules.hungarian import HungarianMatcher
+from diffcsp.pl_modules.ode_solvers import str_to_solver
 
 MAX_ATOMIC_NUM = 100
 
@@ -264,6 +268,138 @@ class CSPFlow(BaseModule):
         }
 
         return traj[N], traj_stack
+
+    def single_time_decoder(self, t, **kwargs):
+        batch_size = kwargs["num_atoms"].shape[0]
+        pred_l, pred_x = self.decoder(
+            t=self.time_embedding(t.repeat(batch_size)),
+            **kwargs,
+        )
+        return pred_l, pred_x
+
+    def resign_lattice_decoder(self, t, x, **kwargs):
+        return self.single_time_decoder(t=t, lattices_rep=x, **kwargs)
+
+    def resign_coords_decoder(self, t, x, **kwargs):
+        return self.single_time_decoder(t=t, frac_coords=x, **kwargs)
+
+    # return func with args [t, x] only
+    def partial_lattice_decoder(self, **kwargs):
+        assert ("lattices_rep" not in kwargs) and ("num_atoms" in kwargs)
+
+        def return_first(func):
+            def wrapper(t, x):
+                return func(t, x)[0]
+            return wrapper
+
+        f = return_first(partial(self.resign_lattice_decoder, **kwargs))
+        assert getfullargspec(f).args == ["t", "x"]
+        return f
+
+    # return func with args [t, x] only
+    def partial_coords_decoder(self, **kwargs):
+        assert ("frac_coords" not in kwargs) and ("num_atoms" in kwargs)
+
+        def return_second(func):
+            def wrapper(t, x):
+                return func(t, x)[1]
+            return wrapper
+
+        f = return_second(partial(self.resign_coords_decoder, **kwargs))
+        assert getfullargspec(f).args == ["t", "x"]
+        return f
+
+    def _fixed_odeint(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+
+        assert solver.stepping_class == "fixed"
+
+        batch_size = batch.num_graphs
+
+        if self.lattice_polar:
+            l_t = self.sample_lattice_polar(batch_size)
+            lattices_mat_t = lattice_polar_build_torch(l_t)
+        else:
+            l_t = self.sample_lattice(batch_size)
+            lattices_mat_t = l_t
+        x_t = torch.rand([batch.num_nodes, 3]).to(self.device)
+
+        traj = {
+            0: {
+                'num_atoms': batch.num_atoms,
+                'atom_types': batch.atom_types,
+                'frac_coords': x_t.clone().detach() % 1.0,
+                'lattices': lattices_mat_t.clone().detach(),
+            }
+        }
+
+        """Solves IVPs with same `t_span`, using fixed-step methods"""
+        t, T, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
+        steps = 1
+        while steps <= len(t_span) - 1:
+            pred_l, pred_x = self.single_time_decoder(
+                t=t,
+                frac_coords=x_t,
+                lattices_rep=l_t,
+                lattices_mat=lattices_mat_t,
+                atom_types=batch.atom_types,
+                num_atoms=batch.num_atoms,
+                node2graph=batch.batch,
+            )
+            vf_coords = self.partial_coords_decoder(
+                lattices_rep=l_t,
+                atom_types=batch.atom_types,
+                num_atoms=batch.num_atoms,
+                node2graph=batch.batch,
+                lattices_mat=lattices_mat_t,
+            )
+            vf_lattice = self.partial_lattice_decoder(
+                frac_coords=x_t,
+                atom_types=batch.atom_types,
+                num_atoms=batch.num_atoms,
+                node2graph=batch.batch,
+                lattices_mat=lattices_mat_t,
+            )
+            if integrate_sequence == "lattice_first":
+                _, l_t, _ = solver.step(f=vf_lattice, x=l_t, t=t, dt=dt, k1=pred_l)
+                _, x_t, _ = solver.step(f=vf_coords, x=x_t, t=t, dt=dt, k1=pred_x)
+            elif integrate_sequence == "coords_first":
+                _, x_t, _ = solver.step(f=vf_coords, x=x_t, t=t, dt=dt, k1=pred_x)
+                _, l_t, _ = solver.step(f=vf_lattice, x=l_t, t=t, dt=dt, k1=pred_l)
+            else:
+                raise NotImplementedError("Unknown ode sequence")
+
+            x_t: torch.Tensor = x_t % 1.0
+            if self.lattice_polar:
+                lattices_mat_t = lattice_polar_build_torch(l_t)
+            else:
+                lattices_mat_t = l_t
+            traj[steps] = {
+                'num_atoms': batch.num_atoms,
+                'atom_types': batch.atom_types,
+                'frac_coords': x_t.clone().detach(),
+                'lattices': lattices_mat_t.clone().detach(),
+            }
+
+            t = t + dt
+            if steps < len(t_span) - 1: dt = t_span[steps+1] - t
+            steps += 1
+
+        traj_stack = {
+            'num_atoms': batch.num_atoms,
+            'atom_types': batch.atom_types,
+            'all_frac_coords': torch.stack([traj[i]['frac_coords'] for i in range(0, steps)]),
+            'all_lattices': torch.stack([traj[i]['lattices'] for i in range(0, steps)]),
+        }
+        return traj[steps - 1], traj_stack
+
+    @torch.no_grad()
+    def sample_ode(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+        t_span = t_span.to(self.device)
+        solver = str_to_solver(solver)
+        if solver.stepping_class == "fixed":
+            return self._fixed_odeint(batch, t_span, solver, integrate_sequence)
+        else:
+            raise NotImplementedError("stepping class except fixed is not accepted.")
 
     def training_step(self, batch, batch_idx: int):
 
