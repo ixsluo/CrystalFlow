@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict
 from functools import partial, partialmethod, wraps
 from inspect import getfullargspec
+from itertools import pairwise
 from operator import itemgetter
 
 import numpy as np
@@ -277,14 +278,14 @@ class CSPFlow(BaseModule):
         )
         return pred_l, pred_x
 
-    def resign_lattice_decoder(self, t, x, **kwargs):
+    def _resign_lattice_decoder(self, t, x, **kwargs):
         return self.single_time_decoder(t=t, lattices_rep=x, **kwargs)
 
-    def resign_coords_decoder(self, t, x, **kwargs):
+    def _resign_coords_decoder(self, t, x, **kwargs):
         return self.single_time_decoder(t=t, frac_coords=x, **kwargs)
 
     # return func with args [t, x] only
-    def partial_lattice_decoder(self, **kwargs):
+    def _partial_lattice_decoder(self, **kwargs):
         assert ("lattices_rep" not in kwargs) and ("num_atoms" in kwargs)
 
         def return_first(func):
@@ -292,12 +293,12 @@ class CSPFlow(BaseModule):
                 return func(t, x)[0]
             return wrapper
 
-        f = return_first(partial(self.resign_lattice_decoder, **kwargs))
+        f = return_first(partial(self._resign_lattice_decoder, **kwargs))
         assert getfullargspec(f).args == ["t", "x"]
         return f
 
     # return func with args [t, x] only
-    def partial_coords_decoder(self, **kwargs):
+    def _partial_coords_decoder(self, **kwargs):
         assert ("frac_coords" not in kwargs) and ("num_atoms" in kwargs)
 
         def return_second(func):
@@ -305,7 +306,7 @@ class CSPFlow(BaseModule):
                 return func(t, x)[1]
             return wrapper
 
-        f = return_second(partial(self.resign_coords_decoder, **kwargs))
+        f = return_second(partial(self._resign_coords_decoder, **kwargs))
         assert getfullargspec(f).args == ["t", "x"]
         return f
 
@@ -333,10 +334,11 @@ class CSPFlow(BaseModule):
         }
 
         """Solves IVPs with same `t_span`, using fixed-step methods"""
-        t, T, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
-        pbar = tqdm(ncols=79, total=len(t_span))
-        pbar.update()
-        for steps, t in enumerate(t_span[:-1], 1):
+        _, T, _ = t_span[0], t_span[-1], t_span[1] - t_span[0]
+        pbar = tqdm(ncols=79, total=len(t_span) - 1)  # note: ignore first zero
+        for steps, (_t, t) in enumerate(pairwise(t_span), 1):  # note: start from second
+            dt = t - _t
+
             pred_l, pred_x = self.single_time_decoder(
                 t=t,
                 frac_coords=x_t,
@@ -346,14 +348,14 @@ class CSPFlow(BaseModule):
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
             )
-            vf_coords = self.partial_coords_decoder(
+            vf_coords = self._partial_coords_decoder(
                 lattices_rep=l_t,
                 atom_types=batch.atom_types,
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
                 lattices_mat=lattices_mat_t,
             )
-            vf_lattice = self.partial_lattice_decoder(
+            vf_lattice = self._partial_lattice_decoder(
                 frac_coords=x_t,
                 atom_types=batch.atom_types,
                 num_atoms=batch.num_atoms,
@@ -381,9 +383,6 @@ class CSPFlow(BaseModule):
                 'lattices': lattices_mat_t.clone().detach(),
             }
 
-            if steps < len(t_span) - 1:
-                dt = t_span[steps] - t
-
             pbar.update()
 
         traj_stack = {
@@ -392,6 +391,7 @@ class CSPFlow(BaseModule):
             'all_frac_coords': torch.stack([t['frac_coords'] for t in traj.values()]),
             'all_lattices': torch.stack([t['lattices'] for t in traj.values()]),
         }
+
         return traj[list(traj)[-1]], traj_stack
 
     @torch.no_grad()
@@ -421,7 +421,6 @@ class CSPFlow(BaseModule):
 
         if loss.isnan():
             return None
-
 
         return loss
 

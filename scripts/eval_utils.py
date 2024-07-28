@@ -337,7 +337,7 @@ def compute_cov(crys, gt_crys,
 
 def get_t_span(scheduler: str, N: int) -> torch.Tensor:
     if scheduler == "linspace":
-        t_span = torch.linspace(0, 1, N)
+        t_span = torch.linspace(0, 1, N + 1)
     else:
         raise NotImplementedError("Unsupported t_span scheduler")
     return t_span
