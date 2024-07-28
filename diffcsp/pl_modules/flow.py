@@ -334,8 +334,9 @@ class CSPFlow(BaseModule):
 
         """Solves IVPs with same `t_span`, using fixed-step methods"""
         t, T, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
-        steps = 1
-        while steps <= len(t_span) - 1:
+        pbar = tqdm(ncols=79, total=len(t_span))
+        pbar.update()
+        for steps, t in enumerate(t_span[:-1], 1):
             pred_l, pred_x = self.single_time_decoder(
                 t=t,
                 frac_coords=x_t,
@@ -380,9 +381,10 @@ class CSPFlow(BaseModule):
                 'lattices': lattices_mat_t.clone().detach(),
             }
 
-            t = t + dt
-            if steps < len(t_span) - 1: dt = t_span[steps+1] - t
-            steps += 1
+            if steps < len(t_span) - 1:
+                dt = t_span[steps] - t
+
+            pbar.update()
 
         traj_stack = {
             'num_atoms': batch.num_atoms,
