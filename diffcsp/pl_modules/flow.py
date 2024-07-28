@@ -389,10 +389,10 @@ class CSPFlow(BaseModule):
         traj_stack = {
             'num_atoms': batch.num_atoms,
             'atom_types': batch.atom_types,
-            'all_frac_coords': torch.stack([traj[i]['frac_coords'] for i in range(0, steps)]),
-            'all_lattices': torch.stack([traj[i]['lattices'] for i in range(0, steps)]),
+            'all_frac_coords': torch.stack([t['frac_coords'] for t in traj.values()]),
+            'all_lattices': torch.stack([t['lattices'] for t in traj.values()]),
         }
-        return traj[steps - 1], traj_stack
+        return traj[list(traj)[-1]], traj_stack
 
     @torch.no_grad()
     def sample_ode(self, batch, t_span, solver, integrate_sequence="lattice_first"):
