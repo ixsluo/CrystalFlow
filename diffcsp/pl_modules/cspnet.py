@@ -159,6 +159,7 @@ class CSPNet(nn.Module):
         hidden_dim=128,
         latent_dim=256,
         lattice_dim=9,
+        cemb_dim=1,
         num_layers=4,
         max_atoms=100,
         act_fn='silu',
@@ -198,6 +199,7 @@ class CSPNet(nn.Module):
             self.rec_emb = None
         else:
             raise ValueError(f"Unknown reciprocal distance embedding: {rec_emb=}")
+
         for i in range(0, num_layers):
             self.add_module(
                 "csp_layer_%d" % i,
@@ -211,6 +213,20 @@ class CSPNet(nn.Module):
                     ip=ip,
                 ),
             )
+            self.add_module(
+                "cemb_mixin_%d" % i,
+                nn.Linear(hidden_dim, hidden_dim, bias=False),
+            )
+            self.add_module(
+                "cemb_adapter_%d" % i,
+                nn.Sequential(
+                    nn.Linear(cemb_dim, hidden_dim),
+                    self.act_fn,
+                    nn.Linear(hidden_dim, hidden_dim),
+                    self.act_fn,
+                ),
+            )
+
         self.num_layers = num_layers
         self.coord_out = nn.Linear(hidden_dim, 3, bias=False)
         self.lattice_out = nn.Linear(hidden_dim, lattice_dim, bias=False)
@@ -334,7 +350,7 @@ class CSPNet(nn.Module):
 
             return edge_index_new, -edge_vector_new
 
-    def forward(self, t, atom_types, frac_coords, lattices_rep, num_atoms, node2graph, lattices_mat=None):
+    def forward(self, t, atom_types, frac_coords, lattices_rep, num_atoms, node2graph, lattices_mat=None, cemb=None, guide_indicator=None):
 
         if lattices_mat is None:
             lattices_mat = lattices_rep
@@ -350,7 +366,15 @@ class CSPNet(nn.Module):
         node_features = self.atom_latent_emb(node_features)
 
         for i in range(0, self.num_layers):
-            node_features = self._modules["csp_layer_%d" % i](
+            # may exist cemb
+            if cemb is not None:
+                cemb_mixin = self._modules["cemb_mixin_%d" % i]
+                cemb_adapter = self._modules["cemb_adapter_%d" % i]
+                cemb = (cemb_mixin(cemb_adapter(cemb)) * guide_indicator[:, None]).repeat_interleave(num_atoms, dim=0)
+                node_features = node_features + cemb
+            # csp layer
+            csp_layer = self._modules["csp_layer_%d" % i]
+            node_features = csp_layer(
                 node_features,
                 frac_coords,
                 lattices_rep,

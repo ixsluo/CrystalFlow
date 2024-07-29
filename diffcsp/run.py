@@ -120,8 +120,10 @@ def run(cfg: DictConfig) -> None:
     if datamodule.scaler is not None:
         model.lattice_scaler = datamodule.lattice_scaler.copy()
         model.scaler = datamodule.scaler.copy()
+        model.scalers = [scaler.copy() for scaler in datamodule.scalers]
     torch.save(datamodule.lattice_scaler, hydra_dir / 'lattice_scaler.pt')
     torch.save(datamodule.scaler, hydra_dir / 'prop_scaler.pt')
+    torch.save(datamodule.scalers, hydra_dir / 'prop_scalers.pt')
     # Instantiate the callbacks
     callbacks: List[Callback] = build_callbacks(cfg=cfg)
 

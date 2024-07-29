@@ -21,7 +21,7 @@ pip install torch_geometric==2.5.3
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.3.0+cu121.html
 pip install lightning==2.3.2
 pip install hydra-core omegaconf python-dotenv wandb rich
-pip install p_tqdm pymatgen pyxtal smact matminer einops chemparse
+pip install p_tqdm pymatgen pyxtal smact matminer einops chemparse torchdyn
 pip install -e .
 mkdir log
 ```
@@ -109,6 +109,30 @@ python scripts/optimization.py --model_path <energy_model_path> --uncond_path <m
 # Evaluation
 python scripts/compute_metrics.py --root_path <energy_model_path> --tasks opt
 ```
+
+#### Flow model - evaluation with various ODE
+
+```bash
+for solver in euler midpoint rk4; do
+for seq in lf cf; do
+for N in 20 50; do
+  label=N${N}R1S${solver}-${seq}
+  echo $label
+  CUDA_VISIBLE_DEVICES=0 python ~/DiffCSP/scripts/evaluate_ode.py \
+    --model_path `pwd` -N $N --solver $solver -seq $seq \
+    --test_bs 1000 --label $label
+  # legacy metrics
+  python ~/DiffCSP/scripts/compute_metrics.py --root_path `pwd` --label $label
+  # metrics without SMACT
+  # python ~/DiffCSP/scripts/compute_metrics_rec.py --root_path `pwd` --label $label
+done
+done
+done
+```
+
+#### Flow model - sample from arbitrary composition & trajectory
+
+TODO
 
 ### Acknowledgments
 

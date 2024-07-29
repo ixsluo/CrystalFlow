@@ -7,6 +7,7 @@ import networkx as nx
 import torch
 import copy
 import itertools
+from pathlib import Path
 
 from pymatgen.core.structure import Structure
 from pymatgen.core.lattice import Lattice
@@ -1268,9 +1269,24 @@ def process_one(row, niggli, primitive, graph_method, prop_list, use_space_group
     return result_dict
 
 
-def preprocess(input_file, num_workers, niggli, primitive, graph_method,
-               prop_list, use_space_group = False, tol=0.01):
-    df = pd.read_csv(input_file)
+def preprocess(
+    input_file,
+    num_workers,
+    niggli,
+    primitive,
+    graph_method,
+    prop_list,
+    use_space_group=False,
+    tol=0.01
+):
+    print(f"Preprocessing {input_file}")
+    suffix = Path(input_file).suffix
+    if suffix == ".csv":
+        df = pd.read_csv(input_file)
+    elif suffix == ".feather":
+        df = pd.read_feather(input_file)
+    else:
+        raise ValueError(f"Unknown format of file: {input_file}")
 
     unordered_results = p_umap(
         process_one,
