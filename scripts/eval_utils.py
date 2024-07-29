@@ -89,7 +89,7 @@ def load_config(model_path):
     return cfg
 
 
-def load_model(model_path, load_data=False, testing=True):
+def load_model(model_path, load_data=False, testing=True, test_bs=None):
     with initialize_config_dir(str(model_path), version_base="1.3"):
         cfg = hydra.compose(config_name='hparams')
         model = hydra.utils.instantiate(
@@ -113,10 +113,13 @@ def load_model(model_path, load_data=False, testing=True):
         model = model.__class__.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
         try:
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
+            model.scalers = torch.load(model_path / 'prop_scalers.pt')
             model.scaler = torch.load(model_path / 'prop_scaler.pt')
         except:
             pass
 
+        if test_bs is not None:
+            cfg.data.datamodule.batch_size.test = test_bs
         if load_data:
             datamodule = hydra.utils.instantiate(
                 cfg.data.datamodule, _recursive_=False, scaler_path=model_path
@@ -330,3 +333,11 @@ def compute_cov(crys, gt_crys,
     }
 
     return metrics_dict, combined_dist_dict
+
+
+def get_t_span(scheduler: str, N: int) -> torch.Tensor:
+    if scheduler == "linspace":
+        t_span = torch.linspace(0, 1, N + 1)
+    else:
+        raise NotImplementedError("Unsupported t_span scheduler")
+    return t_span

@@ -1,8 +1,9 @@
-root_path: ${oc.env:PROJECT_ROOT}/data/mp_20
-prop: formation_energy_per_atom
+root_path: ${oc.env:PROJECT_ROOT}/data/calypso
+prop: enthalpy_per_atom
 num_targets: 1
 properties:
-  - formation_energy_per_atom
+  - enthalpy_per_atom
+  - pressure
 niggli: true
 primitive: False
 graph_method: crystalnn
@@ -28,7 +29,7 @@ datamodule:
     train:
       _target_: diffcsp.pl_data.dataset.CrystDataset
       name: Formation energy train
-      path: ${data.root_path}/train.csv
+      path: ${data.root_path}/train.feather
       save_path: ${data.root_path}/train_ori.pt
       prop: ${data.prop}
       properties: ${data.properties}
@@ -44,7 +45,7 @@ datamodule:
     val:
       - _target_: diffcsp.pl_data.dataset.CrystDataset
         name: Formation energy val
-        path: ${data.root_path}/val.csv
+        path: ${data.root_path}/val.feather
         save_path: ${data.root_path}/val_ori.pt
         prop: ${data.prop}
         properties: ${data.properties}
@@ -60,7 +61,7 @@ datamodule:
     test:
       - _target_: diffcsp.pl_data.dataset.CrystDataset
         name: Formation energy test
-        path: ${data.root_path}/test.csv
+        path: ${data.root_path}/test.feather
         save_path: ${data.root_path}/test_ori.pt
         prop: ${data.prop}
         properties: ${data.properties}
