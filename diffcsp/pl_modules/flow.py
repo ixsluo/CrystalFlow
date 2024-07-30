@@ -126,7 +126,7 @@ class CSPFlow(BaseModule):
     def forward(self, batch):
 
         batch_size = batch.num_graphs
-        eps = 1e-3
+        eps = 1e-6
         times = torch.rand(batch_size, device=self.device) * (1 - eps) + eps  # [eps, 1]
         time_emb = self.time_embedding(times)
 
