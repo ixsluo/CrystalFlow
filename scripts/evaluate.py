@@ -103,11 +103,11 @@ def main(args):
     }, model_path / diff_out_name)    
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', required=True)
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-m', '--model_path', required=True)
     parser.add_argument('--dataset', required=True)
-    parser.add_argument('--step_lr', default=-1, type=float)
-    parser.add_argument('--num_evals', default=1, type=int)
+    parser.add_argument('--step_lr', default=-1, type=float, help="Step interval for ODE/SDE, -1 for SDE dataset defaults.")
+    parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample.")
     parser.add_argument('--label', default='')
     args = parser.parse_args()
     main(args)
