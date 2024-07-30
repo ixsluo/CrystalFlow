@@ -10,6 +10,7 @@ import torch
 from p_tqdm import p_map
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
+from pymatgen.core.trajectory import Trajectory
 from pymatgen.io.cif import CifWriter
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pyxtal.symmetry import Group
@@ -48,13 +49,19 @@ chemical_symbols = [
     'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
     'Lv', 'Ts', 'Og']  # fmt: skip
 
-def diffusion(loader, model, step_lr):
+def diffusion(loader, model, step_lr, return_traj):
 
     frac_coords = []
     num_atoms = []
     atom_types = []
     lattices = []
     input_data_list = []
+
+    all_frac_coords = []
+    all_lattices = []
+    all_lengths = []
+    all_angles = []
+
     for idx, batch in enumerate(loader):
 
         if torch.cuda.is_available():
@@ -65,14 +72,34 @@ def diffusion(loader, model, step_lr):
         atom_types.append(outputs['atom_types'].detach().cpu())
         lattices.append(outputs['lattices'].detach().cpu())
 
+        if return_traj:
+            all_frac_coords.append(traj["all_frac_coords"].detach().cpu())
+            all_lattices.append(traj["all_lattices"].detach().cpu())
+
     frac_coords = torch.cat(frac_coords, dim=0)
     num_atoms = torch.cat(num_atoms, dim=0)
     atom_types = torch.cat(atom_types, dim=0)
     lattices = torch.cat(lattices, dim=0)
     lengths, angles = lattices_to_params_shape(lattices)
 
+    if return_traj:
+        all_frac_coords = torch.cat(all_frac_coords, dim=1)  # dim 0 for traj
+        all_frac_coords = [torch.cat(f, dim=0) for f in zip(all_frac_coords)]
+        all_lattices = torch.cat(all_lattices, dim=1)  # dim 0 for traj
+        all_lattices = [torch.cat(l, dim=0) for l in zip(all_lattices)]
+        all_lengths_angles = [lattices_to_params_shape(l) for l in all_lattices]
+        all_lengths = [lengths_angles[0] for lengths_angles in all_lengths_angles]
+        all_angles = [lengths_angles[1] for lengths_angles in all_lengths_angles]
+    traj_list = [
+        all_frac_coords,
+        all_lengths,
+        all_angles,
+        num_atoms,
+        atom_types,
+    ]
+
     return (
-        frac_coords, atom_types, lattices, lengths, angles, num_atoms
+        frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list,
     )
 
 class SampleDataset(Dataset):
@@ -101,6 +128,7 @@ class SampleDataset(Dataset):
             num_nodes=len(self.chem_list),
         )
 
+
 def get_pymatgen(crystal_array):
     frac_coords = crystal_array['frac_coords']
     atom_types = crystal_array['atom_types']
@@ -113,6 +141,13 @@ def get_pymatgen(crystal_array):
             species=atom_types, coords=frac_coords, coords_are_cartesian=False)
         return structure
     except:
+        return None
+
+
+def get_trajectory(structures):
+    try:
+        return Trajectory.from_structures(structures, constant_lattice=False, coords_are_displacement=False)
+    except Exception:
         return None
 
 
@@ -156,7 +191,7 @@ def main(args):
         if num_evals_list is None:
             num_evals_list = [args.num_evals for _ in formula_list]
     else:
-        formula_list = [args.formula]
+        formula_list = args.formula
         num_evals_list = [args.num_evals]
 
     for formula, num_evals in zip(formula_list, num_evals_list):
@@ -169,11 +204,26 @@ def main(args):
         test_loader = DataLoader(test_set, batch_size = min(args.batch_size, num_evals))
 
         start_time = time.time()
-        (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(test_loader, model, args.step_lr)
+        (frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list) = diffusion(
+            test_loader, model, args.step_lr, return_traj=args.traj,
+        )
 
         crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+        crystal_traj_list = [
+            get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+            for frac_coords, lengths, angles in zip(traj_list[0], traj_list[1], traj_list[2])
+        ]
 
+        print("Translating sample endpoint...")
         strcuture_list = p_map(get_pymatgen, crystal_list)
+        print("Translating trajectory...")
+        structure_traj_list = [
+            p_map(get_pymatgen, crystal_list, desc=f"{itraj=}", ncols=79)
+            for itraj, crystal_list in enumerate(crystal_traj_list)
+        ]
+        traj_list = [get_trajectory(t) for t in zip(*structure_traj_list)]
+        if not args.traj:
+            print("Trajectory not saved.")
 
         for i,structure in enumerate(strcuture_list):
             tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
@@ -182,16 +232,22 @@ def main(args):
                 writer.write_file(tar_file)
             else:
                 print(f"{i+1} Error Structure.")
-
+        for i, traj in enumerate(traj_list):
+            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.XDATCAR")
+            if traj is not None:
+                traj.write_Xdatcar(tar_file, system=formula)
+            else:
+                print(f"{i+1} Error Trajectory.")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
-    parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
     formula_group = parser.add_mutually_exclusive_group(required=True)
-    formula_group.add_argument('-f', '--formula')
+    formula_group.add_argument('-f', '--formula', nargs='+', help="Formula string, multiple values are acceptable.")
     formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula` and `num_evals`(optional), split by WHITESPACE characters.")  # fmt: skip
+    parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
+    parser.add_argument('--traj', action="store_true", help="Save trajectory.")
     parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
     parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split sampling times of each formula.")
     parser.add_argument('--step_lr', default=1e-5, type=float, help="step_lr for SDE/ODE.")

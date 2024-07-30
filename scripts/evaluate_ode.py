@@ -61,7 +61,13 @@ def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence):
 
 
     return (
-        frac_coords, atom_types, lattices, lengths, angles, num_atoms, input_data_batch
+        frac_coords,
+        atom_types,
+        lattices,
+        lengths,
+        angles,
+        num_atoms,
+        input_data_batch,
     )
 
 
@@ -71,10 +77,8 @@ def main(args):
     model_path = Path(args.model_path)
     model, test_loader, cfg = load_model(
         model_path, load_data=True, test_bs=args.test_bs)
-
     if torch.cuda.is_available():
         model.to('cuda')
-
 
     print('Evaluate the diffusion model.')
 
@@ -87,8 +91,17 @@ def main(args):
         raise NotImplementedError("Unknown integrate sequence")
 
     start_time = time.time()
-    (frac_coords, atom_types, lattices, lengths, angles, num_atoms, input_data_batch) = diffusion(
-        test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence)
+    (
+        frac_coords,
+        atom_types,
+        lattices,
+        lengths,
+        angles,
+        num_atoms,
+        input_data_batch,
+    ) = diffusion(
+        test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence
+    )
 
     if args.label == '':
         diff_out_name = 'eval_diff.pt'
@@ -108,19 +121,19 @@ def main(args):
     }, model_path / diff_out_name)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_path', required=True)
-    parser.add_argument('-N', '--ode_int_steps', type=int, default=20, help="ODE integrate steps number, default: 20")
-    parser.add_argument('--ode_scheduler', choices=['linspace'], default='linspace', help="ODE integrate time spam scheduler, default: linspace")
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
+    parser.add_argument('-N', '--ode_int_steps', type=int, default=20, help="ODE integrate steps number.")
+    parser.add_argument('--ode_scheduler', choices=['linspace'], default='linspace', help="ODE integrate time spam scheduler.")
     parser.add_argument('--solver', choices=[
         'euler', 'midpoint',
         'rk4', 'rk-4', 'RungeKutta4',
         'ieuler', 'implicit_euler',
         # 'alf', 'AsynchronousLeapfrog'
-        ], default="euler", help="ODE integrate solver, default: euler")
-    parser.add_argument('-seq', "--integrate_sequence", choices=['lf', 'lattice_first', 'cf', 'coords_first'], default='lf', help="Which to integrate first, default: lattice_first")
-    parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample, default: 1")
-    parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize, default: None")
+        ], default="euler", help="ODE integrate solver.")
+    parser.add_argument('-seq', "--integrate_sequence", choices=['lf', 'lattice_first', 'cf', 'coords_first'], default='lf', help="Which to integrate first")
+    parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample.")
+    parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize.")
     parser.add_argument('--label', default='')
     args = parser.parse_args()
     main(args)
