@@ -132,7 +132,9 @@ done
 
 #### Flow model - sample from arbitrary composition & trajectory
 
-TODO
+```bash
+CUDA_VISIBLE_DEVICES=0 python ~/DiffCSP/scripts/sample_ode.py -m `pwd` -d sample -h
+```
 
 ### Acknowledgments
 
