@@ -100,6 +100,8 @@ class CSPFlow(BaseModule):
         self.permute_l = HungarianMatcher("norm")
         self.permute_f = HungarianMatcher("norm_mic")
         self.lattice_polar = self.hparams.get("lattice_polar", False)
+        self.lattice_polar_sigma = self.hparams.get("lattice_polar_sigma", 1.0)
+        self.from_cubic = self.hparams.get("from_cubic", False)
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -119,8 +121,10 @@ class CSPFlow(BaseModule):
         return l0
 
     def sample_lattice_polar(self, batch_size):
-        l0 = torch.randn([batch_size, 6], device=self.device)
+        l0 = torch.randn([batch_size, 6], device=self.device) * self.lattice_polar_sigma
         l0[:, -1] = l0[:, -1] + 1
+        if self.from_cubic:
+            l0[:, :5] = 0
         return l0
 
     def forward(self, batch):
