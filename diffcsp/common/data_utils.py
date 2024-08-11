@@ -1,3 +1,4 @@
+import json
 import warnings
 import math
 import numpy as np
@@ -1248,6 +1249,19 @@ def get_scaler_from_data_list(data_list, key):
     return scaler
 
 
+def parse_prop(item):
+    if isinstance(item, (float, int, np.generic)):
+        return item
+    elif isinstance(item, str):
+        try:
+            loadeditem = json.loads(item)
+        except Exception as e:
+            pass
+        return loadeditem
+    else:
+        raise ValueError(f"Parse prop failed: {item}")
+
+
 def process_one(row, niggli, primitive, graph_method, prop_list, use_space_group = False, tol=0.01):
     crystal_str = row['cif']
     crystal = build_crystal(
@@ -1259,7 +1273,7 @@ def process_one(row, niggli, primitive, graph_method, prop_list, use_space_group
     else:
         result_dict['spacegroup'] = 1
     graph_arrays = build_crystal_graph(crystal, graph_method)
-    properties = {k: row[k] for k in prop_list if k in row.keys()}
+    properties = {k: parse_prop(row[k]) for k in prop_list if k in row.keys()}
     result_dict.update({
         'mp_id': row['material_id'],
         'cif': crystal_str,
