@@ -102,6 +102,12 @@ class CSPFlow(BaseModule):
         self.lattice_polar = self.hparams.get("lattice_polar", False)
         self.lattice_polar_sigma = self.hparams.get("lattice_polar_sigma", 1.0)
         self.from_cubic = self.hparams.get("from_cubic", False)
+        self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
+
+        if self.keep_lattice:
+            hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
+        if self.keep_coords:
+            hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coords}, setting to keep coords.")
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -135,6 +141,7 @@ class CSPFlow(BaseModule):
         time_emb = self.time_embedding(times)
 
         # Build time stamp T and 0
+        # lattice
         if self.lattice_polar:
             lattices_rep_T = batch.lattice_polar
             lattices_rep_0 = self.sample_lattice_polar(batch_size)
@@ -143,10 +150,13 @@ class CSPFlow(BaseModule):
             lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
             lattices_rep_T = lattices_mat_T
             lattices_rep_0 = self.sample_lattice(batch_size)
-
+        lattice_teacher_forcing = self.current_epoch < self.lattice_teacher_forcing
+        if lattice_teacher_forcing:
+            lattices_rep_0 = lattices_rep_T
+        # coords
         frac_coords = batch.frac_coords
         f0 = torch.rand_like(frac_coords)
-
+        # optimal transport
         if self.ot:
             _, lattices_rep_0 = self.permute_l(lattices_rep_T, lattices_rep_0)
             _, f0 = self.permute_f(frac_coords, f0)
@@ -154,23 +164,23 @@ class CSPFlow(BaseModule):
         # Build time stamp t
         tar_l = lattices_rep_T - lattices_rep_0
         tar_f = (frac_coords - f0) % 1 - 0.5
-
+        # Build input lattice rep/mat and input coords
         l_expand_dim = (slice(None),) + (None,) * (tar_l.dim() - 1)
         input_lattice_rep = lattices_rep_0 + times[l_expand_dim] * tar_l
         input_frac_coords = f0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_f
-
         if self.lattice_polar:
             input_lattice_mat = lattice_polar_build_torch(input_lattice_rep)
         else:
             input_lattice_mat = input_lattice_rep
 
-        #
+        # Replace inputs if fixed
         if self.keep_coords:
             input_frac_coords = frac_coords
         if self.keep_lattice:
             input_lattice_rep = lattices_rep_T
             input_lattice_mat = lattices_mat_T
 
+        # Flow
         pred_l, pred_f = self.decoder(
             t=time_emb,
             atom_types=batch.atom_types,
@@ -184,7 +194,9 @@ class CSPFlow(BaseModule):
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
-        loss = self.hparams.cost_lattice * loss_lattice + self.hparams.cost_coord * loss_coord
+        cost_coords = self.hparams.cost_coords
+        cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
+        loss = cost_lattice * loss_lattice + cost_coords * loss_coord
 
         return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
 
