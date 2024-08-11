@@ -116,7 +116,7 @@ class CSPFlow(BaseModule):
 
         if self.keep_lattice:
             hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
-        if self.keep_coord:
+        if self.keep_coords:
             hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coord}, setting to keep coords.")
 
     def sample_lengths(self, num_atoms, batch_size):
