@@ -116,8 +116,8 @@ class CSPFlow(BaseModule):
 
         if self.keep_lattice:
             hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
-        if self.keep_coords:
-            hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coords}, setting to keep coords.")
+        if self.keep_coord:
+            hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coord}, setting to keep coords.")
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -203,9 +203,9 @@ class CSPFlow(BaseModule):
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
-        cost_coords = self.hparams.cost_coords
+        cost_coord = self.hparams.cost_coord
         cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
-        loss = cost_lattice * loss_lattice + cost_coords * loss_coord
+        loss = cost_lattice * loss_lattice + cost_coord * loss_coord
 
         return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
 
