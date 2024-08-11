@@ -1,7 +1,9 @@
 import argparse
+import math
 import os
 import time
 from pathlib import Path
+from itertools import chain, islice
 
 import chemparse
 import numpy as np
@@ -15,13 +17,23 @@ from pymatgen.io.cif import CifWriter
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pyxtal.symmetry import Group
 from torch.optim import Adam
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset
 from torch_geometric.data import Batch, Data
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
 
 # LOCALFOLDER
 from eval_utils import get_crystals_list, lattices_to_params_shape, load_model, get_t_span  # isort: skip
+
+
+def batched(iterable, n):
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError('n must be at least one')
+    iterator = iter(iterable)
+    while batch := tuple(islice(iterator, n)):
+        yield batch
+
 
 chemical_symbols = [
     # 0
@@ -111,7 +123,7 @@ def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence, retu
 
 class SampleDataset(Dataset):
 
-    def __init__(self, formula, num_evals):
+    def __init__(self, formula: str, num_evals):
         super().__init__()
         self.formula = formula
         self.num_evals = num_evals
@@ -130,6 +142,7 @@ class SampleDataset(Dataset):
 
     def __getitem__(self, index):
         return Data(
+            formula=self.formula,
             atom_types=torch.LongTensor(self.chem_list),
             num_atoms=len(self.chem_list),
             num_nodes=len(self.chem_list),
@@ -170,17 +183,9 @@ def load_formula_tabular_file(formula_file):
     if header is None:
         print("Assume first column as formulas")
         formula_list = formula_tabular[0].astype(str).tolist()
-        if len(formula_tabular.columns) > 1:
-            print("Assume second column as num_evals")
-            num_evals_list = formula_tabular[1].astype(int).tolist()
-        else:
-            num_evals_list = None
     else:
         formula_list = formula_tabular["formula"].tolist()
-        if "num_evals" in formula_tabular.columns:
-            num_evals_list = formula_tabular["num_evals"].astype(int).tolist()
-        else:
-            num_evals_list = None
+    num_evals_list = None  # Not allowed to custom
     return formula_list, num_evals_list
 
 
@@ -203,21 +208,19 @@ def main(args):
     assert (args.formula or args.formula_file), "At least one of formula or formula_list should be provided."
     if args.formula_file is not None:
         print(f"Trying reading sampling formula and num_evals from '{args.formula_file}'...")
-        formula_list, num_evals_list = load_formula_tabular_file(args.formula_file)
-        if num_evals_list is None:
-            num_evals_list = [args.num_evals for _ in formula_list]
+        formula_list, _ = load_formula_tabular_file(args.formula_file)
+        num_evals_list = [args.num_evals for _ in formula_list]
     else:
         formula_list = args.formula
         num_evals_list = [args.num_evals]
 
-    for formula, num_evals in zip(formula_list, num_evals_list):
-        tar_dir = os.path.join(args.save_path, formula)
-        os.makedirs(tar_dir, exist_ok=True)
-
-        print(f'Sampling {formula} times {num_evals}...')
-
-        test_set = SampleDataset(formula, num_evals)
-        test_loader = DataLoader(test_set, batch_size = min(args.batch_size, num_evals))
+    num_formula_per_batch = args.batch_size // args.num_evals
+    batch_size = num_formula_per_batch * args.num_evals
+    total_batch = math.ceil(len(formula_list) // num_formula_per_batch)
+    for ib, sub_formulas in enumerate(batched(formula_list, num_formula_per_batch)):
+        print(f"Split {ib}/{total_batch}")
+        sub_dataset = ConcatDataset(SampleDataset(formula, args.num_evals) for formula in sub_formulas)
+        sub_loader = DataLoader(sub_dataset, batch_size=batch_size)
 
         start_time = time.time()
         (
@@ -229,18 +232,16 @@ def main(args):
             num_atoms,
             traj_list,
         ) = diffusion(
-            test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence,
+            sub_loader, model, args.num_evals, t_span, args.solver, integrate_sequence,
             return_traj=args.traj,
         )
-
         crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
         crystal_traj_list = [
             get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
             for frac_coords, lengths, angles in zip(traj_list[0], traj_list[1], traj_list[2])
         ]
-
         print("Translating sample endpoint...")
-        strcuture_list = p_map(get_pymatgen, crystal_list, ncols=79)
+        structure_list = p_map(get_pymatgen, crystal_list, ncols=79)
         print("Translating trajectory...")
         structure_traj_list = [
             p_map(get_pymatgen, crystal_list, desc=f"{itraj=}", ncols=79)
@@ -250,19 +251,30 @@ def main(args):
         if not args.traj:
             print("Trajectory not saved.")
 
-        for i, structure in enumerate(strcuture_list):
-            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
-            if structure is not None:
-                writer = CifWriter(structure)
-                writer.write_file(tar_file)
-            else:
-                print(f"{i+1} Error Structure.")
-        for i, traj in enumerate(traj_list):
-            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.XDATCAR")
-            if traj is not None:
-                traj.write_Xdatcar(tar_file, system=formula)
-            else:
-                print(f"{i+1} Error Trajectory.")
+        for formula, sub_structure_list in zip(
+            sub_formulas, batched(structure_list, args.num_evals), strict=True
+        ):
+            tar_dir = os.path.join(args.save_path, formula)
+            os.makedirs(tar_dir, exist_ok=True)
+            for i, structure in enumerate(sub_structure_list):
+                tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
+                if structure is not None:
+                    writer = CifWriter(structure)
+                    writer.write_file(tar_file)
+                else:
+                    print(f"{i+1} Error Structure.")
+
+        if args.traj:
+            for formula, sub_traj_list in zip(
+                sub_formulas, batched(traj_list, args.num_evals), strict=False
+            ):
+                tar_dir = os.path.join(args.save_path, formula)
+                for i, traj in enumerate(sub_traj_list):
+                    tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.XDATCAR")
+                    if traj is not None:
+                        traj.write_Xdatcar(tar_file, system=formula)
+                    else:
+                        print(f"{i+1} Error Trajectory.")
 
 
 if __name__ == '__main__':
@@ -270,11 +282,11 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
     formula_group = parser.add_mutually_exclusive_group(required=True)
     formula_group.add_argument('-f', '--formula', nargs='+', help="Formula string, multiple values are acceptable.")
-    formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula` and `num_evals`(optional), split by WHITESPACE characters.")  # fmt: skip
+    formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula`, split by WHITESPACE characters.")  # fmt: skip
     parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
     parser.add_argument('--traj', action="store_true", help="Save trajectory.")
     parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
-    parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split sampling times of each formula.")
+    parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split total sample, avoid Out of Memory.")
     parser.add_argument('-N', '--ode_int_steps', type=int, default=20, help="ODE integrate steps number.")
     parser.add_argument('--ode_scheduler', choices=['linspace'], default='linspace', help="ODE integrate time spam scheduler.")
     parser.add_argument('--solver', choices=[
