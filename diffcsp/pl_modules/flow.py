@@ -83,17 +83,27 @@ class SinusoidalTimeEmbeddings(nn.Module):
         return embeddings
 
 
+class DirectUnsqueezeTime(nn.Module):
+    def forward(self, time: torch.Tensor):
+        return time.unsqueeze(-1)
+
+
 class CSPFlow(BaseModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.decoder = hydra.utils.instantiate(
-            self.hparams.decoder, latent_dim=self.hparams.latent_dim + self.hparams.time_dim, _recursive_=False
+            self.hparams.decoder,
+            latent_dim=self.hparams.latent_dim + self.hparams.time_dim,  # 0 + time
+            _recursive_=False,
         )
         self.beta_scheduler = hydra.utils.instantiate(self.hparams.beta_scheduler)
         self.sigma_scheduler = hydra.utils.instantiate(self.hparams.sigma_scheduler)
         self.time_dim = self.hparams.time_dim
-        self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
+        if self.time_dim == 0:
+            self.time_embedding = DirectUnsqueezeTime()
+        else:
+            self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
         self.keep_lattice = self.hparams.cost_lattice < 1e-5
         self.keep_coords = self.hparams.cost_coord < 1e-5
         self.ot = self.hparams.get("ot", False)
@@ -136,8 +146,7 @@ class CSPFlow(BaseModule):
     def forward(self, batch):
 
         batch_size = batch.num_graphs
-        eps = 1e-6
-        times = torch.rand(batch_size, device=self.device) * (1 - eps) + eps  # [eps, 1]
+        times = torch.rand(batch_size, device=self.device)
         time_emb = self.time_embedding(times)
 
         # Build time stamp T and 0
