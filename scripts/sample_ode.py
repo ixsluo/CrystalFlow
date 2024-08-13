@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import time
+from collections import Counter
 from pathlib import Path
 from itertools import chain, islice
 
@@ -10,7 +11,9 @@ import numpy as np
 import pandas as pd
 import torch
 from p_tqdm import p_map
+from pymatgen.core.composition import Composition
 from pymatgen.core.lattice import Lattice
+from pymatgen.core.periodic_table import Element
 from pymatgen.core.structure import Structure
 from pymatgen.core.trajectory import Trajectory
 from pymatgen.io.cif import CifWriter
@@ -78,7 +81,10 @@ def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence, retu
 
         if torch.cuda.is_available():
             batch.cuda()
-        outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence)
+        if solver == "none":
+            outputs, traj = model.sample(batch, step_lr=1 / (len(t_span) - 1))
+        else:
+            outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence)
         frac_coords.append(outputs['frac_coords'].detach().cpu())
         num_atoms.append(outputs['num_atoms'].detach().cpu())
         atom_types.append(outputs['atom_types'].detach().cpu())
@@ -192,11 +198,31 @@ def load_formula_tabular_file(formula_file):
 def main(args):
     print("Loading model...")
     model_path = Path(args.model_path)
-    model, _, cfg = load_model(
-        model_path, load_data=False)
+    model, test_loader, cfg = load_model(model_path, load_data=args.testset)
     if torch.cuda.is_available():
         model.to('cuda')
 
+    if args.formula is not None:
+        print(f"Target formula: {args.formula}")
+        formula_list = args.formula
+    elif args.formula_file is not None:
+        print(f"Target formula: reading from '{args.formula_file}'...")
+        formula_list, _ = load_formula_tabular_file(args.formula_file)
+    elif args.testset:
+        print(f"Target formula: loading from testset...")
+        formula_list = [
+            Composition(
+                {
+                    Element.from_Z(z): n
+                    for z, n in Counter(data.atom_types).items()
+                }
+            ).formula.replace(' ', '')
+            for data in test_loader.dataset
+        ]
+    else:
+        raise ValueError("Unknown formula target.")
+
+    # time stamps
     t_span = get_t_span(args.ode_scheduler, args.ode_int_steps)
     if args.integrate_sequence in ["lf", "lattice_first"]:
         integrate_sequence = "lattice_first"
@@ -205,15 +231,7 @@ def main(args):
     else:
         raise NotImplementedError("Unknown integrate sequence")
 
-    assert (args.formula or args.formula_file), "At least one of formula or formula_list should be provided."
-    if args.formula_file is not None:
-        print(f"Trying reading sampling formula and num_evals from '{args.formula_file}'...")
-        formula_list, _ = load_formula_tabular_file(args.formula_file)
-        num_evals_list = [args.num_evals for _ in formula_list]
-    else:
-        formula_list = args.formula
-        num_evals_list = [args.num_evals]
-
+    # start
     num_formula_per_batch = args.batch_size // args.num_evals
     batch_size = num_formula_per_batch * args.num_evals
     total_batch = math.ceil(len(formula_list) // num_formula_per_batch)
@@ -283,6 +301,7 @@ if __name__ == '__main__':
     formula_group = parser.add_mutually_exclusive_group(required=True)
     formula_group.add_argument('-f', '--formula', nargs='+', help="Formula string, multiple values are acceptable.")
     formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula`, split by WHITESPACE characters.")  # fmt: skip
+    formula_group.add_argument('--testset', action="store_true", help="Sample testset")
     parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
     parser.add_argument('--traj', action="store_true", help="Save trajectory.")
     parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
@@ -290,6 +309,7 @@ if __name__ == '__main__':
     parser.add_argument('-N', '--ode_int_steps', type=int, default=20, help="ODE integrate steps number.")
     parser.add_argument('--ode_scheduler', choices=['linspace'], default='linspace', help="ODE integrate time spam scheduler.")
     parser.add_argument('--solver', choices=[
+        'none',
         'euler', 'midpoint',
         'rk4', 'rk-4', 'RungeKutta4',
         'ieuler', 'implicit_euler',
