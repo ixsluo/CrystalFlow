@@ -2,6 +2,7 @@ import argparse
 import math
 import os
 import time
+import shutil
 from collections import Counter
 from pathlib import Path
 from itertools import chain, islice
@@ -231,6 +232,9 @@ def main(args):
     else:
         raise NotImplementedError("Unknown integrate sequence")
 
+    if args.overwrite:
+        shutil.rmtree(args.save_path, ignore_errors=True)
+
     # start
     num_formula_per_batch = args.batch_size // args.num_evals
     batch_size = num_formula_per_batch * args.num_evals
@@ -274,7 +278,8 @@ def main(args):
         ):
             tar_dir = os.path.join(args.save_path, formula)
             os.makedirs(tar_dir, exist_ok=True)
-            for i, structure in enumerate(sub_structure_list):
+            n_exist = len(list(Path(tar_dir).glob("*.cif")))
+            for i, structure in enumerate(sub_structure_list, n_exist):
                 tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
                 if structure is not None:
                     writer = CifWriter(structure)
@@ -287,7 +292,8 @@ def main(args):
                 sub_formulas, batched(traj_list, args.num_evals), strict=False
             ):
                 tar_dir = os.path.join(args.save_path, formula)
-                for i, traj in enumerate(sub_traj_list):
+                n_exist = len(list(Path(tar_dir).glob("*.XDATCAR")))
+                for i, traj in enumerate(sub_traj_list, n_exist):
                     tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.XDATCAR")
                     if traj is not None:
                         traj.write_Xdatcar(tar_file, system=formula)
@@ -303,6 +309,7 @@ if __name__ == '__main__':
     formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula`, split by WHITESPACE characters.")  # fmt: skip
     formula_group.add_argument('--testset', action="store_true", help="Sample testset")
     parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
+    parser.add_argument('--overwrite', action="store_true", help="Remove any exist `save_path` before start.")
     parser.add_argument('--traj', action="store_true", help="Save trajectory.")
     parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
     parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split total sample, avoid Out of Memory.")
