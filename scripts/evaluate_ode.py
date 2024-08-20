@@ -20,7 +20,10 @@ import copy
 import numpy as np
 
 
-def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence):
+def diffusion(
+    loader, model, num_evals, t_span, solver, integrate_sequence,
+    **sample_kwargs,
+):
 
     frac_coords = []
     num_atoms = []
@@ -38,7 +41,7 @@ def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence):
         for eval_idx in range(num_evals):
 
             print(f'batch {idx} / {len(loader)}, sample {eval_idx} / {num_evals}')
-            outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence)
+            outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence, **sample_kwargs)
             batch_frac_coords.append(outputs['frac_coords'].detach().cpu())
             batch_num_atoms.append(outputs['num_atoms'].detach().cpu())
             batch_atom_types.append(outputs['atom_types'].detach().cpu())
@@ -100,7 +103,9 @@ def main(args):
         num_atoms,
         input_data_batch,
     ) = diffusion(
-        test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence
+        test_loader, model, args.num_evals, t_span, args.solver, integrate_sequence,
+        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords,
+        anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
     )
 
     if args.label == '':
@@ -132,6 +137,10 @@ if __name__ == '__main__':
         # 'alf', 'AsynchronousLeapfrog'
         ], default="euler", help="ODE integrate solver.")
     parser.add_argument('-seq', "--integrate_sequence", choices=['lf', 'lattice_first', 'cf', 'coords_first'], default='lf', help="Which to integrate first")
+    parser.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
+    parser.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    parser.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
+    parser.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
     parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample.")
     parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize.")
     parser.add_argument('--label', default='')

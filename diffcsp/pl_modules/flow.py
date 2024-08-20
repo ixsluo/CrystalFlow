@@ -209,10 +209,22 @@ class CSPFlow(BaseModule):
 
         return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
 
+    @staticmethod
+    def get_anneal_factor(t, slope: float = 0.0, offset: float = 0.0):
+        if not isinstance(t, torch.Tensor):
+            t = torch.tensor(t)
+        return 1 + slope * F.relu(t - offset)
+
+
     @torch.no_grad()
-    def sample(self, batch, step_lr=None, N=None):
+    def sample(
+        self, batch, step_lr=None, N=None,
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
         if N is None:
-            N = int(1 / step_lr)
+            N = round(1 / step_lr)
 
         batch_size = batch.num_graphs
 
@@ -269,6 +281,11 @@ class CSPFlow(BaseModule):
                 node2graph=batch.batch,
                 lattices_mat=lattices_mat_t,
             )
+            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
+            if anneal_lattice:
+                pred_l *= anneal_factor
+            if anneal_coords:
+                pred_x *= anneal_factor
 
             x_t = x_t + pred_x / N if not self.keep_coords else x_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
@@ -335,7 +352,12 @@ class CSPFlow(BaseModule):
         assert getfullargspec(f).args == ["t", "x"]
         return f
 
-    def _fixed_odeint(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+    def _fixed_odeint(
+        self, batch, t_span, solver, integrate_sequence="lattice_first",
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
 
         assert solver.stepping_class == "fixed"
 
@@ -373,6 +395,13 @@ class CSPFlow(BaseModule):
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
             )
+
+            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
+            if anneal_lattice:
+                pred_l *= anneal_factor
+            if anneal_coords:
+                pred_x *= anneal_factor
+
             vf_coords = self._partial_coords_decoder(
                 lattices_rep=l_t,
                 atom_types=batch.atom_types,
@@ -420,11 +449,21 @@ class CSPFlow(BaseModule):
         return traj[list(traj)[-1]], traj_stack
 
     @torch.no_grad()
-    def sample_ode(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+    def sample_ode(
+        self, batch, t_span, solver, integrate_sequence="lattice_first",
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
         t_span = t_span.to(self.device)
         solver = str_to_solver(solver)
         if solver.stepping_class == "fixed":
-            return self._fixed_odeint(batch, t_span, solver, integrate_sequence)
+            return self._fixed_odeint(
+                batch, t_span, solver, integrate_sequence,
+                anneal_lattice, anneal_coords,
+                anneal_slope, anneal_offset,
+                **kwargs,
+            )
         else:
             raise NotImplementedError("stepping class except fixed is not accepted.")
 

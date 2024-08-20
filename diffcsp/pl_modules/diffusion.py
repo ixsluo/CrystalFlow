@@ -123,7 +123,7 @@ class CSPDiffusion(BaseModule):
         }
 
     @torch.no_grad()
-    def sample(self, batch, step_lr = 1e-5):
+    def sample(self, batch, step_lr=1e-5, **kwargs):
 
         batch_size = batch.num_graphs
 

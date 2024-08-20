@@ -65,7 +65,12 @@ chemical_symbols = [
     'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
     'Lv', 'Ts', 'Og']  # fmt: skip
 
-def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence, return_traj):
+def diffusion(
+    loader, model, num_evals,
+    t_span, solver, integrate_sequence,
+    return_traj,
+    **sample_kwargs
+):
 
     frac_coords = []
     num_atoms = []
@@ -83,9 +88,9 @@ def diffusion(loader, model, num_evals, t_span, solver, integrate_sequence, retu
         if torch.cuda.is_available():
             batch.cuda()
         if solver == "none":
-            outputs, traj = model.sample(batch, step_lr=1 / (len(t_span) - 1))
+            outputs, traj = model.sample(batch, step_lr=1 / (len(t_span) - 1), **sample_kwargs)
         else:
-            outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence)
+            outputs, traj = model.sample_ode(batch, t_span, solver, integrate_sequence, **sample_kwargs)
         frac_coords.append(outputs['frac_coords'].detach().cpu())
         num_atoms.append(outputs['num_atoms'].detach().cpu())
         atom_types.append(outputs['atom_types'].detach().cpu())
@@ -256,6 +261,8 @@ def main(args):
         ) = diffusion(
             sub_loader, model, args.num_evals, t_span, args.solver, integrate_sequence,
             return_traj=args.traj,
+            anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords,
+            anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
         )
         crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
         crystal_traj_list = [
@@ -323,6 +330,10 @@ if __name__ == '__main__':
         # 'alf', 'AsynchronousLeapfrog'
         ], default="euler", help="ODE integrate solver, default: euler")
     parser.add_argument('-seq', "--integrate_sequence", choices=['lf', 'lattice_first', 'cf', 'coords_first'], default='lf', help="Which to integrate first.")
+    parser.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
+    parser.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    parser.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
+    parser.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
 
     args = parser.parse_args()
 
