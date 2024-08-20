@@ -83,23 +83,41 @@ class SinusoidalTimeEmbeddings(nn.Module):
         return embeddings
 
 
+class DirectUnsqueezeTime(nn.Module):
+    def forward(self, time: torch.Tensor):
+        return time.unsqueeze(-1)
+
+
 class CSPFlow(BaseModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         self.decoder = hydra.utils.instantiate(
-            self.hparams.decoder, latent_dim=self.hparams.latent_dim + self.hparams.time_dim, _recursive_=False
+            self.hparams.decoder,
+            latent_dim=self.hparams.latent_dim + self.hparams.time_dim,  # 0 + time
+            _recursive_=False,
         )
         self.beta_scheduler = hydra.utils.instantiate(self.hparams.beta_scheduler)
         self.sigma_scheduler = hydra.utils.instantiate(self.hparams.sigma_scheduler)
         self.time_dim = self.hparams.time_dim
-        self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
+        if self.time_dim == 0:
+            self.time_embedding = DirectUnsqueezeTime()
+        else:
+            self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
         self.keep_lattice = self.hparams.cost_lattice < 1e-5
         self.keep_coords = self.hparams.cost_coord < 1e-5
         self.ot = self.hparams.get("ot", False)
         self.permute_l = HungarianMatcher("norm")
         self.permute_f = HungarianMatcher("norm_mic")
         self.lattice_polar = self.hparams.get("lattice_polar", False)
+        self.lattice_polar_sigma = self.hparams.get("lattice_polar_sigma", 1.0)
+        self.from_cubic = self.hparams.get("from_cubic", False)
+        self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
+
+        if self.keep_lattice:
+            hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
+        if self.keep_coords:
+            hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coord}, setting to keep coords.")
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -119,18 +137,20 @@ class CSPFlow(BaseModule):
         return l0
 
     def sample_lattice_polar(self, batch_size):
-        l0 = torch.randn([batch_size, 6], device=self.device)
+        l0 = torch.randn([batch_size, 6], device=self.device) * self.lattice_polar_sigma
         l0[:, -1] = l0[:, -1] + 1
+        if self.from_cubic:
+            l0[:, :5] = 0
         return l0
 
     def forward(self, batch):
 
         batch_size = batch.num_graphs
-        eps = 1e-6
-        times = torch.rand(batch_size, device=self.device) * (1 - eps) + eps  # [eps, 1]
+        times = torch.rand(batch_size, device=self.device)
         time_emb = self.time_embedding(times)
 
         # Build time stamp T and 0
+        # lattice
         if self.lattice_polar:
             lattices_rep_T = batch.lattice_polar
             lattices_rep_0 = self.sample_lattice_polar(batch_size)
@@ -139,10 +159,13 @@ class CSPFlow(BaseModule):
             lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
             lattices_rep_T = lattices_mat_T
             lattices_rep_0 = self.sample_lattice(batch_size)
-
+        lattice_teacher_forcing = self.current_epoch < self.lattice_teacher_forcing
+        if lattice_teacher_forcing:
+            lattices_rep_0 = lattices_rep_T
+        # coords
         frac_coords = batch.frac_coords
         f0 = torch.rand_like(frac_coords)
-
+        # optimal transport
         if self.ot:
             _, lattices_rep_0 = self.permute_l(lattices_rep_T, lattices_rep_0)
             _, f0 = self.permute_f(frac_coords, f0)
@@ -150,23 +173,23 @@ class CSPFlow(BaseModule):
         # Build time stamp t
         tar_l = lattices_rep_T - lattices_rep_0
         tar_f = (frac_coords - f0) % 1 - 0.5
-
+        # Build input lattice rep/mat and input coords
         l_expand_dim = (slice(None),) + (None,) * (tar_l.dim() - 1)
         input_lattice_rep = lattices_rep_0 + times[l_expand_dim] * tar_l
         input_frac_coords = f0 + times.repeat_interleave(batch.num_atoms)[:, None] * tar_f
-
         if self.lattice_polar:
             input_lattice_mat = lattice_polar_build_torch(input_lattice_rep)
         else:
             input_lattice_mat = input_lattice_rep
 
-        #
+        # Replace inputs if fixed
         if self.keep_coords:
             input_frac_coords = frac_coords
         if self.keep_lattice:
             input_lattice_rep = lattices_rep_T
             input_lattice_mat = lattices_mat_T
 
+        # Flow
         pred_l, pred_f = self.decoder(
             t=time_emb,
             atom_types=batch.atom_types,
@@ -180,14 +203,28 @@ class CSPFlow(BaseModule):
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
-        loss = self.hparams.cost_lattice * loss_lattice + self.hparams.cost_coord * loss_coord
+        cost_coord = self.hparams.cost_coord
+        cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
+        loss = cost_lattice * loss_lattice + cost_coord * loss_coord
 
         return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
 
+    @staticmethod
+    def get_anneal_factor(t, slope: float = 0.0, offset: float = 0.0):
+        if not isinstance(t, torch.Tensor):
+            t = torch.tensor(t)
+        return 1 + slope * F.relu(t - offset)
+
+
     @torch.no_grad()
-    def sample(self, batch, step_lr=None, N=None):
+    def sample(
+        self, batch, step_lr=None, N=None,
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
         if N is None:
-            N = int(1 / step_lr)
+            N = round(1 / step_lr)
 
         batch_size = batch.num_graphs
 
@@ -244,6 +281,11 @@ class CSPFlow(BaseModule):
                 node2graph=batch.batch,
                 lattices_mat=lattices_mat_t,
             )
+            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
+            if anneal_lattice:
+                pred_l *= anneal_factor
+            if anneal_coords:
+                pred_x *= anneal_factor
 
             x_t = x_t + pred_x / N if not self.keep_coords else x_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
@@ -310,7 +352,12 @@ class CSPFlow(BaseModule):
         assert getfullargspec(f).args == ["t", "x"]
         return f
 
-    def _fixed_odeint(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+    def _fixed_odeint(
+        self, batch, t_span, solver, integrate_sequence="lattice_first",
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
 
         assert solver.stepping_class == "fixed"
 
@@ -348,6 +395,13 @@ class CSPFlow(BaseModule):
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
             )
+
+            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
+            if anneal_lattice:
+                pred_l *= anneal_factor
+            if anneal_coords:
+                pred_x *= anneal_factor
+
             vf_coords = self._partial_coords_decoder(
                 lattices_rep=l_t,
                 atom_types=batch.atom_types,
@@ -395,11 +449,21 @@ class CSPFlow(BaseModule):
         return traj[list(traj)[-1]], traj_stack
 
     @torch.no_grad()
-    def sample_ode(self, batch, t_span, solver, integrate_sequence="lattice_first"):
+    def sample_ode(
+        self, batch, t_span, solver, integrate_sequence="lattice_first",
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+        **kwargs,
+    ):
         t_span = t_span.to(self.device)
         solver = str_to_solver(solver)
         if solver.stepping_class == "fixed":
-            return self._fixed_odeint(batch, t_span, solver, integrate_sequence)
+            return self._fixed_odeint(
+                batch, t_span, solver, integrate_sequence,
+                anneal_lattice, anneal_coords,
+                anneal_slope, anneal_offset,
+                **kwargs,
+            )
         else:
             raise NotImplementedError("stepping class except fixed is not accepted.")
 

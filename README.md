@@ -44,6 +44,8 @@ export    WANDB_DIR="/home/<YOURHOME>/DiffCSP/log"
 
 ### Training
 
+#### DiffCSP
+
 For the CSP task
 
 ```bash
@@ -60,6 +62,21 @@ python diffcsp/run.py data=<dataset> model=diffusion_w_type expname=<expname>
 ```
 
 The ``<dataset>`` tag can be selected from perov_5, mp_20, mpts_52 and carbon_24, and the ``<expname>`` tag can be an arbitrary name to identify each experiment. Pre-trained checkpoints are provided [here](https://drive.google.com/drive/folders/11WOc9lTZN4hkIY7SKLCIrbsTMGy9TsoW?usp=sharing).
+
+#### Flow model
+
+optional command line parameters
+```
+model=[flow|flow_polar]  # use direct lattice or polar-decomposition lattice
++model.from_cubic=true  # sample lattice from cubic prior, only effect on flow_polar
++lattice_polar_sigma=1  # lattice polar prior sigma
+model.decoder.rec_emb=sin model.decoder.num_millers=6  # use reciprocal representation
+model.time_dim=0  # if 0, use no embedding, else sinusoidal embedding
++model.lattice_teacher_forcing=-1  # epoch of teacher-forcing on lattice
+model.cost_coord=10 model.cost_lattice=0.1  # fix coords or lattice if less than 1e-5
++model.ot=true  # use optimal transport, default false
+```
+
 
 ### Evaluation
 
