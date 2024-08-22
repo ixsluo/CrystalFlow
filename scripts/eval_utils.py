@@ -2,6 +2,8 @@ import itertools
 import numpy as np
 import torch
 import hydra
+from torch.utils.data import ConcatDataset
+from torch_geometric.loader import DataLoader
 
 from scipy.spatial.distance import pdist
 from scipy.spatial.distance import cdist
@@ -19,7 +21,6 @@ from diffcsp.common.data_utils import StandardScaler, chemical_symbols
 from diffcsp.pl_data.dataset import TensorCrystDataset
 from diffcsp.pl_data.datamodule import worker_init_fn
 
-from torch_geometric.data import DataLoader
 
 CompScaler = StandardScaler(
     means=np.array(CompScalerMeans),
@@ -126,11 +127,17 @@ def load_model(model_path, load_data=False, testing=True, test_bs=None):
             )
             if testing:
                 datamodule.setup('test')
-                test_loader = datamodule.test_dataloader()[0]
+                dataset = ConcatDataset(loader.dataset for loader in datamodule.test_dataloader())
+                test_loader = DataLoader(dataset, batch_size=cfg.data.datamodule.batch_size.test)
             else:
                 datamodule.setup()
-                train_loader = datamodule.train_dataloader(shuffle=False)
-                val_loader = datamodule.val_dataloader()[0]
+                if isinstance(datamodule.tranin_dataloader(shuffle=False), list):
+                    dataset = ConcatDataset(loader.dataset for loader in datamodule.train_dataloader(shuffle=False))
+                    train_loader = DataLoader(dataset, batch_size=cfg.data.datamodule.batch_size.test)
+                else:
+                    train_loader = datamodule.train_dataloader(shuffle=False)
+                dataset = ConcatDataset(loader.dataset for loader in datamodule.val_dataloader())
+                val_loader = DataLoader(dataset, batch_size=cfg.data.datamodule.batch_size.test)
                 test_loader = (train_loader, val_loader)
         else:
             test_loader = None
