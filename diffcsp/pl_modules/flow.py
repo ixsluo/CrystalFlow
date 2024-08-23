@@ -92,18 +92,20 @@ class CSPFlow(BaseModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        if self.hparams.time_dim == 0:
+            self.time_dim = 1
+            self.time_embedding = DirectUnsqueezeTime()
+        else:
+            self.time_dim = self.hparams.time_dim
+            self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
+
         self.decoder = hydra.utils.instantiate(
             self.hparams.decoder,
-            latent_dim=self.hparams.latent_dim + self.hparams.time_dim,  # 0 + time
+            latent_dim=self.hparams.latent_dim + self.time_dim,  # 0 + time
             _recursive_=False,
         )
         self.beta_scheduler = hydra.utils.instantiate(self.hparams.beta_scheduler)
         self.sigma_scheduler = hydra.utils.instantiate(self.hparams.sigma_scheduler)
-        self.time_dim = self.hparams.time_dim
-        if self.time_dim == 0:
-            self.time_embedding = DirectUnsqueezeTime()
-        else:
-            self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
         self.keep_lattice = self.hparams.cost_lattice < 1e-5
         self.keep_coords = self.hparams.cost_coord < 1e-5
         self.ot = self.hparams.get("ot", False)
