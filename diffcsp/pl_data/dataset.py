@@ -111,6 +111,7 @@ class CrystDataset(Dataset):
             data.spacegroup = torch.LongTensor([data_dict['spacegroup']])
             data.ops = torch.Tensor(data_dict['wyckoff_ops'])
             data.anchor_index = torch.LongTensor(data_dict['anchors'])
+            data.ops_inv = torch.linalg.pinv(data.ops[:,:3,:3])
 
         if self.use_pos_index:
             pos_dic = {}
@@ -187,9 +188,19 @@ def main(cfg: omegaconf.DictConfig):
     dataset.scaler = get_scaler_from_data_list(dataset.cached_data, key=dataset.prop)
     dataset.scalers = [get_scaler_from_data_list(dataset.cached_data, key=key) for key in dataset.properties]
 
-    data_list = [dataset[i] for i in range(len(dataset))]
+    for valcfg in cfg.data.datamodule.datasets.val:
+        hydra.utils.instantiate(valcfg, _recursive_=False)
+    for testcfg in cfg.data.datamodule.datasets.test:
+        hydra.utils.instantiate(testcfg, _recursive_=False)
+
+    print("One Sample: ", dataset[0])
+    print(dataset[0].anchor_index)
+    print(dataset[0].ops[:4])
+    print(dataset[0].ops_inv[:4])
+    data_list = [dataset[i] for i in range(len(dataset))[:2]]
     batch = Batch.from_data_list(data_list)
-    print(batch)
+    print("Total Batch: ", batch)
+    print(batch.anchor_index)
     return batch
 
 
