@@ -112,6 +112,7 @@ def load_model(model_path, load_data=False, testing=True, test_bs=None):
                 ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
         hparams = os.path.join(model_path, "hparams.yaml")
         model = model.__class__.load_from_checkpoint(ckpt, hparams_file=hparams, strict=False)
+        print("Model loaded with ", sum(p.numel() for p in model.parameters()), " parameters.")
         try:
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
             model.scalers = torch.load(model_path / 'prop_scalers.pt')

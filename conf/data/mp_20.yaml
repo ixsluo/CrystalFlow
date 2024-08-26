@@ -14,7 +14,7 @@ otf_graph: false
 eval_model_name: mp20
 tolerance: 0.1
 
-use_space_group: false
+use_space_group: true
 use_pos_index: false
 train_max_epochs: 1000
 early_stopping_patience: 100000
