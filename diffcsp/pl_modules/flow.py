@@ -40,6 +40,7 @@ from diffcsp.common.data_utils import (
 from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
 from diffcsp.pl_modules.hungarian import HungarianMatcher
+from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
 from diffcsp.pl_modules.ode_solvers import str_to_solver
 
 MAX_ATOMIC_NUM = 100
@@ -115,11 +116,14 @@ class CSPFlow(BaseModule):
         self.lattice_polar_sigma = self.hparams.get("lattice_polar_sigma", 1.0)
         self.from_cubic = self.hparams.get("from_cubic", False)
         self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
+        self.symmetrize = self.hparams.get("symmetrize", False)
 
         if self.keep_lattice:
             hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
         if self.keep_coords:
             hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coord}, setting to keep coords.")
+
+        self.latticedecompnn = LatticeDecompNN()
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -156,21 +160,34 @@ class CSPFlow(BaseModule):
         if self.lattice_polar:
             lattices_rep_T = batch.lattice_polar
             lattices_rep_0 = self.sample_lattice_polar(batch_size)
+            if self.symmetrize:
+                lattices_rep_T = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_T, batch.spacegroup)
+                lattices_rep_0 = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_0, batch.spacegroup)
             lattices_mat_T = lattice_polar_build_torch(lattices_rep_T)
         else:
-            lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
-            lattices_rep_T = lattices_mat_T
+            lattices_rep_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
             lattices_rep_0 = self.sample_lattice(batch_size)
+            if self.symmetrize:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            lattices_mat_T = lattices_rep_T
+        # lattice teacher forcing
         lattice_teacher_forcing = self.current_epoch < self.lattice_teacher_forcing
         if lattice_teacher_forcing:
             lattices_rep_0 = lattices_rep_T
+
         # coords
         frac_coords = batch.frac_coords
         f0 = torch.rand_like(frac_coords)
+        if self.symmetrize:
+            f0_anchor = f0[batch.anchor_index]
+            f0_anchor = torch.einsum('bij,bj->bi', batch.ops_inv[batch.anchor_index], f0_anchor)
+            f0 = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f0_anchor) + batch.ops[:, :3, 3]
         # optimal transport
         if self.ot:
             _, lattices_rep_0 = self.permute_l(lattices_rep_T, lattices_rep_0)
             _, f0 = self.permute_f(frac_coords, f0)
+            if self.symmetrize:
+                raise ValueError("OT is forbidden in symmetrize.")
 
         # Build time stamp t
         tar_l = lattices_rep_T - lattices_rep_0
@@ -202,6 +219,17 @@ class CSPFlow(BaseModule):
             lattices_mat=input_lattice_mat,
         )
 
+        if self.symmetrize:
+            if self.lattice_polar:
+                pred_l = self.latticedecompnn.proj_k_to_spacegroup(pred_l, batch.spacegroup)
+            else:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
+            pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
+            # for loss
+            tar_f = tar_f_anchor
+            pred_f = pred_f_anchor
+
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
@@ -216,7 +244,6 @@ class CSPFlow(BaseModule):
         if not isinstance(t, torch.Tensor):
             t = torch.tensor(t)
         return 1 + slope * F.relu(t - offset)
-
 
     @torch.no_grad()
     def sample(
@@ -233,16 +260,23 @@ class CSPFlow(BaseModule):
         # time stamp T
         if self.lattice_polar:
             l_T = self.sample_lattice_polar(batch_size)
+            if self.symmetrize:
+                l_T = self.latticedecompnn.proj_k_to_spacegroup(l_T, batch.spacegroup)
             lattices_mat_T = lattice_polar_build_torch(l_T)
         else:
             l_T = self.sample_lattice(batch_size)
+            if self.symmetrize:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             lattices_mat_T = l_T
 
-        x_T = torch.rand([batch.num_nodes, 3]).to(self.device)
+        f_T = torch.rand([batch.num_nodes, 3]).to(self.device)
+        f_T_anchor = f_T[batch.anchor_index]
+        f_T_anchor = torch.einsum('bij,bj->bi', batch.ops_inv[batch.anchor_index, :3, :3], f_T_anchor)
+        f_T = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f_T_anchor) + batch.ops[:, :3, 3]
 
         #
         if self.keep_coords:
-            x_T = batch.frac_coords
+            f_T = batch.frac_coords
         if self.keep_lattice:
             lattices_mat_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
             if self.lattice_polar:
@@ -254,14 +288,14 @@ class CSPFlow(BaseModule):
             0: {
                 'num_atoms': batch.num_atoms,
                 'atom_types': batch.atom_types,
-                'frac_coords': x_T % 1.0,
+                'frac_coords': f_T % 1.0,
                 'lattices': lattices_mat_T,
             }
         }
 
         lattices_mat_t = lattices_mat_T.clone().detach()
         l_t = l_T.clone().detach()
-        x_t = x_T.clone().detach()
+        f_t = f_T.clone().detach()
 
         for t in tqdm(range(1, N + 1)):
 
@@ -269,29 +303,39 @@ class CSPFlow(BaseModule):
             time_emb = self.time_embedding(times)
 
             if self.keep_coords:
-                x_t = x_T
+                f_t = f_T
             if self.keep_lattice:
                 l_t = l_T
                 lattices_mat_t = lattices_mat_T
 
-            pred_l, pred_x = self.decoder(
+            pred_l, pred_f = self.decoder(
                 t=time_emb,
                 atom_types=batch.atom_types,
-                frac_coords=x_t,
+                frac_coords=f_t,
                 lattices_rep=l_t,
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
                 lattices_mat=lattices_mat_t,
             )
+
+            if self.symmetrize:
+                if self.lattice_polar:
+                    pred_l = self.latticedecompnn.proj_k_to_spacegroup(pred_l, batch.spacegroup)
+                else:
+                    raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+                pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
+                pred_f_anchor = scatter(pred_f_anchor, batch.anchor_index, dim=0, reduce = 'mean')[batch.anchor_index]
+                pred_f = torch.einsum('bij,bj->bi', batch.ops, pred_f_anchor)
+
             anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
             if anneal_lattice:
                 pred_l *= anneal_factor
             if anneal_coords:
-                pred_x *= anneal_factor
+                pred_f *= anneal_factor
 
-            x_t = x_t + pred_x / N if not self.keep_coords else x_t
+            f_t = f_t + pred_f / N if not self.keep_coords else f_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
-            x_t = x_t % 1.0
+            f_t = f_t % 1.0
 
             if self.lattice_polar:
                 lattices_mat_t = lattice_polar_build_torch(l_t)
@@ -301,7 +345,7 @@ class CSPFlow(BaseModule):
             traj[t] = {
                 'num_atoms': batch.num_atoms,
                 'atom_types': batch.atom_types,
-                'frac_coords': x_t,
+                'frac_coords': f_t,
                 'lattices': lattices_mat_t,
             }
 
