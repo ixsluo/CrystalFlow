@@ -174,7 +174,7 @@ class CSPFlow(BaseModule):
 
         # Build time stamp t
         tar_l = lattices_rep_T - lattices_rep_0
-        tar_f = (frac_coords - f0) % 1 - 0.5
+        tar_f = (frac_coords - f0 - 0.5) % 1 - 0.5
         # Build input lattice rep/mat and input coords
         l_expand_dim = (slice(None),) + (None,) * (tar_l.dim() - 1)
         input_lattice_rep = lattices_rep_0 + times[l_expand_dim] * tar_l
