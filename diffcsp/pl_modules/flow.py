@@ -42,6 +42,7 @@ from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
 from diffcsp.pl_modules.hungarian import HungarianMatcher
 from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
 from diffcsp.pl_modules.ode_solvers import str_to_solver
+from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
 
 MAX_ATOMIC_NUM = 100
 
@@ -119,6 +120,7 @@ class CSPFlow(BaseModule):
         self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
         self.symmetrize_anchor = self.hparams.get("symmetrize_anchor", False)
         self.symmetrize_rotavg = self.hparams.get("symmetrize_rotavg", False)
+        self.symm_rotavg = SymmetrizeRotavg()
 
         if self.ot:
             hydra.utils.log.info("Using optimal transport")
@@ -178,7 +180,8 @@ class CSPFlow(BaseModule):
                 lattices_rep_T = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_T, batch.spacegroup)
                 lattices_rep_0 = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_0, batch.spacegroup)
             elif self.symmetrize_rotavg:
-                raise NotImplementedError("symmetrize_rotavg")
+                lattices_rep_T = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_T, batch.spacegroup)
+                lattices_rep_0 = self.latticedecompnn.proj_k_to_spacegroup(lattices_rep_0, batch.spacegroup)
             lattices_mat_T = lattice_polar_build_torch(lattices_rep_T)
         else:
             lattices_rep_T = lattice_params_to_matrix_torch(batch.lengths, batch.angles)
@@ -201,6 +204,17 @@ class CSPFlow(BaseModule):
             f0_anchor = torch.einsum('bij,bj->bi', batch.ops_inv[batch.anchor_index], f0_anchor)
             f0 = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f0_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
+            # TODO
+            # f0 = self.symm_rotavg.symmetrize_rank1(
+            #     lattices=input_lattice_mat,
+            #     inv_lattices=torch.linalg.inv(input_lattice_mat),
+            #     forces=pred_f,
+            #     batch=None,
+            #     num_atoms=batch.num_atoms,
+            #     general_ops=batch.general_ops,
+            #     symm_map=batch.symm_map,
+            #     num_general_ops=batch.num_general_ops,
+            # )
             raise NotImplementedError("symmetrize_rotavg")
         # optimal transport
         if self.ot:
@@ -250,7 +264,20 @@ class CSPFlow(BaseModule):
             tar_f = tar_f_anchor
             pred_f = pred_f_anchor
         elif self.symmetrize_rotavg:
-            raise NotImplementedError("symmetrize_rotavg")
+            if self.lattice_polar:
+                pred_l = self.latticedecompnn.proj_k_to_spacegroup(pred_l, batch.spacegroup)
+            else:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            pred_f = self.symm_rotavg.symmetrize_rank1(
+                lattices=input_lattice_mat,
+                inv_lattices=torch.linalg.inv(input_lattice_mat),
+                forces=pred_f,
+                batch=None,
+                num_atoms=batch.num_atoms,
+                general_ops=batch.general_ops,
+                symm_map=batch.symm_map,
+                num_general_ops=batch.num_general_ops,
+            )
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)

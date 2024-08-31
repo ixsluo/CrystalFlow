@@ -74,6 +74,7 @@ class CrystDataset(Dataset):
         return len(self.cached_data)
 
     def __getitem__(self, index):
+        assert isinstance(index, int), "Only one item can be returned at one time."
         data_dict = self.cached_data[index]
 
         # scaler is set in DataModule set stage
@@ -112,6 +113,10 @@ class CrystDataset(Dataset):
             data.ops = torch.Tensor(data_dict['wyckoff_ops'])
             data.anchor_index = torch.LongTensor(data_dict['anchors'])
             data.ops_inv = torch.linalg.pinv(data.ops[:,:3,:3])
+            data.general_ops = torch.Tensor(data_dict['general_wyckoff_ops'])  # (Nops, 4, 4)
+            data.general_ops_inv = torch.linalg.inv(data.general_ops[:, :3, :3])  # (Nops, 3, 3)
+            data.symm_map = data_dict['symm_map'].tolist()  # (Nops, Nat)
+            data.num_general_ops = len(data_dict['general_wyckoff_ops'])  # Nops
 
         if self.use_pos_index:
             pos_dic = {}
