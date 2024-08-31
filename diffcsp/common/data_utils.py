@@ -139,6 +139,17 @@ def refine_spacegroup(crystal, tol=0.01):
     return crystal, space_group
 
 
+def find_symm_map(frac_coords, general_wyckoff_ops):
+    frac_coords = frac_coords % 1
+    transformed = np.einsum('pij,nj->pni', general_wyckoff_ops[:, :3, :3], frac_coords)
+    transformed += general_wyckoff_ops[:, :3, 3][:, None, :]
+    diff = frac_coords[None, None, :, :] - transformed[:, :, None, :]
+    diff -= np.round(diff)
+    norms = np.linalg.norm(diff, axis=-1)
+    symm_map = np.argmin(norms, axis=-1)
+    return symm_map
+
+
 def get_symmetry_info(crystal, tol=0.01):
     spga = SpacegroupAnalyzer(crystal, symprec=tol)
     crystal = spga.get_refined_structure()
@@ -164,10 +175,14 @@ def get_symmetry_info(crystal, tol=0.01):
     anchors = np.array(anchors)
     matrices = np.array(matrices)
     coords = np.array(coords) % 1.
+    general_wyckoff_ops = np.array([op.affine_matrix for op in c.group[0].ops])
+    symm_map = find_symm_map(coords, general_wyckoff_ops)
     sym_info = {
-        'anchors':anchors,
-        'wyckoff_ops':matrices,
-        'spacegroup':space_group
+        'anchors': anchors,
+        'wyckoff_ops': matrices,
+        'spacegroup': space_group,
+        'general_wyckoff_ops': general_wyckoff_ops,
+        'symm_map': symm_map,
     }
     crystal = Structure(
         lattice=Lattice.from_parameters(*np.array(c.lattice.get_para(degree=True))),
