@@ -101,3 +101,14 @@ class LatticeDecompNN(nn.Module):
             masks = self.masks[spacegroup, :-1] # B * 5
             biass = self.biass[spacegroup, :-1] # B * 5
         return vec * masks + biass
+
+    def proj_kdiff_to_spacegroup(self, vec, spacegroup):
+        batch_size, dims = vec.shape
+        if dims == 6:
+            masks = self.masks[spacegroup, :] # B * 6
+            biass = self.biass[spacegroup, :] # B * 6  
+        elif dims == 5:
+            # - volume
+            masks = self.masks[spacegroup, :-1] # B * 5
+            biass = self.biass[spacegroup, :-1] # B * 5
+        return vec * masks
