@@ -88,7 +88,7 @@ def run(cfg: DictConfig) -> None:
             f"Forcing debugger friendly configuration!"
         )
         # Debuggers don't like GPUs nor multiprocessing
-        cfg.train.pl_trainer.gpus = 0
+        # cfg.train.pl_trainer.gpus = 0
         cfg.data.datamodule.num_workers.train = 0
         cfg.data.datamodule.num_workers.val = 0
         cfg.data.datamodule.num_workers.test = 0
@@ -175,8 +175,9 @@ def run(cfg: DictConfig) -> None:
     hydra.utils.log.info("Starting training!")
     trainer.fit(model=model, datamodule=datamodule, ckpt_path=ckpt)
 
-    hydra.utils.log.info("Starting testing!")
-    trainer.test(datamodule=datamodule)
+    if not cfg.train.pl_trainer.fast_dev_run:
+        hydra.utils.log.info("Starting testing!")
+        trainer.test(datamodule=datamodule)
 
     # Logger closing to release resources/avoid multi-run conflicts
     if wandb_logger is not None:
