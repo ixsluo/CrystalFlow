@@ -287,6 +287,41 @@ class CSPFlow(BaseModule):
             t = torch.tensor(t)
         return 1 + slope * F.relu(t - offset)
 
+    def post_decoder_on_sample(
+        self, pred_l, pred_f,
+        batch, t,
+        anneal_lattice=False, anneal_coords=False,
+        anneal_slope=0.0, anneal_offset=0.0,
+    ):
+        if self.symmetrize_anchor:
+            if self.lattice_polar:
+                pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
+            else:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
+            pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
+            # for loss
+            tar_f = tar_f_anchor
+            pred_f = pred_f_anchor
+        elif self.symmetrize_rotavg:
+            if self.lattice_polar:
+                pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
+            else:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            pred_f = self.symm_rotavg.symmetrize_rank1_scaled(
+                forces=pred_f,
+                num_atoms=batch.num_atoms,
+                general_ops=batch.general_ops,
+                symm_map=batch.symm_map,
+                num_general_ops=batch.num_general_ops,
+            )
+        anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
+        if anneal_lattice:
+            pred_l *= anneal_factor
+        if anneal_coords:
+            pred_f *= anneal_factor
+        return pred_l, pred_f
+
     @torch.no_grad()
     def sample(
         self, batch, step_lr=None, N=None,
@@ -373,36 +408,12 @@ class CSPFlow(BaseModule):
                 lattices_mat=lattices_mat_t,
             )
 
-            if self.symmetrize_anchor:
-                # lattice
-                if self.lattice_polar:
-                    pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
-                else:
-                    raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
-                # coords
-                pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
-                pred_f_anchor = scatter(pred_f_anchor, batch.anchor_index, dim=0, reduce = 'mean')[batch.anchor_index]
-                pred_f = torch.einsum('bij,bj->bi', batch.ops, pred_f_anchor)
-            elif self.symmetrize_rotavg:
-                # lattice
-                if self.lattice_polar:
-                    pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
-                else:
-                    raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
-                # coords
-                pred_f = self.symm_rotavg.symmetrize_rank1_scaled(
-                    forces=pred_f,
-                    num_atoms=batch.num_atoms,
-                    general_ops=batch.general_ops,
-                    symm_map=batch.symm_map,
-                    num_general_ops=batch.num_general_ops,
-                )
-
-            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
-            if anneal_lattice:
-                pred_l *= anneal_factor
-            if anneal_coords:
-                pred_f *= anneal_factor
+            pred_l, pred_f = self.post_decoder_on_sample(
+                pred_l, pred_f,
+                batch=batch, t=time_emb,
+                anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
+                anneal_slope=anneal_slope, anneal_offset=anneal_offset,
+            )
 
             f_t = f_t + pred_f / N if not self.keep_coords else f_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
@@ -431,8 +442,9 @@ class CSPFlow(BaseModule):
 
     def single_time_decoder(self, t, **kwargs):
         batch_size = kwargs["num_atoms"].shape[0]
+        time_emb = self.time_embedding(t.repeat(batch_size))
         pred_l, pred_x = self.decoder(
-            t=self.time_embedding(t.repeat(batch_size)),
+            t=time_emb,
             **kwargs,
         )
         return pred_l, pred_x
@@ -513,11 +525,13 @@ class CSPFlow(BaseModule):
                 node2graph=batch.batch,
             )
 
-            anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
-            if anneal_lattice:
-                pred_l *= anneal_factor
-            if anneal_coords:
-                pred_x *= anneal_factor
+            time_emb = self.time_embedding(t.repeat(batch_size))
+            pred_l, pred_f = self.post_decoder_on_sample(
+                pred_l, pred_f,
+                batch=batch, t=time_emb,
+                anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
+                anneal_slope=anneal_slope, anneal_offset=anneal_offset,
+            )
 
             vf_coords = self._partial_coords_decoder(
                 lattices_rep=l_t,
