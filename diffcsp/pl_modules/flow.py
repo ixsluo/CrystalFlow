@@ -298,11 +298,9 @@ class CSPFlow(BaseModule):
                 pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
-            tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
             pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
-            # for loss
-            tar_f = tar_f_anchor
-            pred_f = pred_f_anchor
+            pred_f_anchor = scatter(pred_f_anchor, batch.anchor_index, dim=0, reduce = 'mean')[batch.anchor_index]
+            pred_f = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], pred_f_anchor)
         elif self.symmetrize_rotavg:
             if self.lattice_polar:
                 pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
@@ -410,7 +408,7 @@ class CSPFlow(BaseModule):
 
             pred_l, pred_f = self.post_decoder_on_sample(
                 pred_l, pred_f,
-                batch=batch, t=time_emb,
+                batch=batch, t=t,
                 anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
                 anneal_slope=anneal_slope, anneal_offset=anneal_offset,
             )
@@ -494,17 +492,38 @@ class CSPFlow(BaseModule):
 
         if self.lattice_polar:
             l_t = self.sample_lattice_polar(batch_size)
+            if self.symmetrize_anchor:
+                l_t = self.latticedecompnn.proj_k_to_spacegroup(l_t, batch.spacegroup)
+            elif self.symmetrize_rotavg:
+                l_t = self.latticedecompnn.proj_k_to_spacegroup(l_t, batch.spacegroup)
             lattices_mat_t = lattice_polar_build_torch(l_t)
         else:
             l_t = self.sample_lattice(batch_size)
+            if self.symmetrize_anchor:
+                raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
+            elif self.symmetrize_rotavg:
+                raise NotImplementedError("symmetrize_rotavg")
             lattices_mat_t = l_t
-        x_t = torch.rand([batch.num_nodes, 3]).to(self.device)
+
+        f_t = torch.rand([batch.num_nodes, 3]).to(self.device)
+        if self.symmetrize_anchor:
+            f_t_anchor = f_t[batch.anchor_index]
+            f_t_anchor = torch.einsum('bij,bj->bi', batch.ops_inv[batch.anchor_index, :3, :3], f_t_anchor)
+            f_t = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f_t_anchor) + batch.ops[:, :3, 3]
+        elif self.symmetrize_rotavg:
+            f_t = self.symm_rotavg.symmetrize_rank1_scaled(
+                forces=f_t,
+                num_atoms=batch.num_atoms,
+                general_ops=batch.general_ops,
+                symm_map=batch.symm_map,
+                num_general_ops=batch.num_general_ops,
+            ) + batch.ops[:, :3, 3]
 
         traj = {
             0: {
                 'num_atoms': batch.num_atoms,
                 'atom_types': batch.atom_types,
-                'frac_coords': x_t.clone().detach() % 1.0,
+                'frac_coords': f_t.clone().detach() % 1.0,
                 'lattices': lattices_mat_t.clone().detach(),
             }
         }
@@ -515,9 +534,9 @@ class CSPFlow(BaseModule):
         for steps, (_t, t) in enumerate(pairwise(t_span), 1):  # note: start from second
             dt = t - _t
 
-            pred_l, pred_x = self.single_time_decoder(
+            pred_l, pred_f = self.single_time_decoder(
                 t=t,
-                frac_coords=x_t,
+                frac_coords=f_t,
                 lattices_rep=l_t,
                 lattices_mat=lattices_mat_t,
                 atom_types=batch.atom_types,
@@ -528,7 +547,7 @@ class CSPFlow(BaseModule):
             time_emb = self.time_embedding(t.repeat(batch_size))
             pred_l, pred_f = self.post_decoder_on_sample(
                 pred_l, pred_f,
-                batch=batch, t=time_emb,
+                batch=batch, t=t,
                 anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
                 anneal_slope=anneal_slope, anneal_offset=anneal_offset,
             )
@@ -541,7 +560,7 @@ class CSPFlow(BaseModule):
                 lattices_mat=lattices_mat_t,
             )
             vf_lattice = self._partial_lattice_decoder(
-                frac_coords=x_t,
+                frac_coords=f_t,
                 atom_types=batch.atom_types,
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
@@ -549,14 +568,14 @@ class CSPFlow(BaseModule):
             )
             if integrate_sequence == "lattice_first":
                 _, l_t, _ = solver.step(f=vf_lattice, x=l_t, t=t, dt=dt, k1=pred_l)
-                _, x_t, _ = solver.step(f=vf_coords, x=x_t, t=t, dt=dt, k1=pred_x)
+                _, f_t, _ = solver.step(f=vf_coords, x=f_t, t=t, dt=dt, k1=pred_f)
             elif integrate_sequence == "coords_first":
-                _, x_t, _ = solver.step(f=vf_coords, x=x_t, t=t, dt=dt, k1=pred_x)
+                _, f_t, _ = solver.step(f=vf_coords, x=f_t, t=t, dt=dt, k1=pred_f)
                 _, l_t, _ = solver.step(f=vf_lattice, x=l_t, t=t, dt=dt, k1=pred_l)
             else:
                 raise NotImplementedError("Unknown ode sequence")
 
-            x_t: torch.Tensor = x_t % 1.0
+            f_t: torch.Tensor = f_t % 1.0
             if self.lattice_polar:
                 lattices_mat_t = lattice_polar_build_torch(l_t)
             else:
@@ -564,7 +583,7 @@ class CSPFlow(BaseModule):
             traj[steps] = {
                 'num_atoms': batch.num_atoms,
                 'atom_types': batch.atom_types,
-                'frac_coords': x_t.clone().detach(),
+                'frac_coords': f_t.clone().detach(),
                 'lattices': lattices_mat_t.clone().detach(),
             }
 
