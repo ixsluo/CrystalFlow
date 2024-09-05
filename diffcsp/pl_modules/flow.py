@@ -206,7 +206,7 @@ class CSPFlow(BaseModule):
             f0 = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f0_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
             f0 = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=f0,
+                scaled_forces=f0,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
@@ -268,7 +268,7 @@ class CSPFlow(BaseModule):
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             pred_f_symmetrized = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=pred_f,
+                scaled_forces=pred_f,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
@@ -324,7 +324,7 @@ class CSPFlow(BaseModule):
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             pred_f = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=pred_f,
+                scaled_forces=pred_f,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
@@ -372,7 +372,7 @@ class CSPFlow(BaseModule):
             f_T = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f_T_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
             f_T = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=f_T,
+                scaled_forces=f_T,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
