@@ -121,6 +121,7 @@ class CSPFlow(BaseModule):
         self.symmetrize_anchor = self.hparams.get("symmetrize_anchor", False)
         self.symmetrize_rotavg = self.hparams.get("symmetrize_rotavg", False)
         self.symm_rotavg = SymmetrizeRotavg()
+        self.cost_symmetrize = self.hparams.get("cost_symmetrize", 0.0)
 
         if self.ot:
             hydra.utils.log.info("Using optimal transport")
@@ -205,7 +206,7 @@ class CSPFlow(BaseModule):
             f0 = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f0_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
             f0 = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=f0,
+                scaled_forces=f0,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
@@ -256,6 +257,8 @@ class CSPFlow(BaseModule):
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
             pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
+            pred_f_symmetrized = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], pred_f_anchor)
+            loss_symmetrize = F.mse_loss(pred_f, pred_f_symmetrized)
             # for loss
             tar_f = tar_f_anchor
             pred_f = pred_f_anchor
@@ -264,22 +267,36 @@ class CSPFlow(BaseModule):
                 pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
-            pred_f = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=pred_f,
+            pred_f_symmetrized = self.symm_rotavg.symmetrize_rank1_scaled(
+                scaled_forces=pred_f,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
                 num_general_ops=batch.num_general_ops,
             )
+            loss_symmetrize = F.mse_loss(pred_f, pred_f_symmetrized)
+            pred_f = pred_f_symmetrized
+        else:
+            loss_symmetrize = 0.0
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
         cost_coord = self.hparams.cost_coord
         cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
-        loss = cost_lattice * loss_lattice + cost_coord * loss_coord
+        cost_symmetrize = self.cost_symmetrize
+        loss = (
+            cost_lattice * loss_lattice 
+            + cost_coord * loss_coord 
+            + cost_symmetrize * loss_symmetrize
+        )
 
-        return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
+        return {
+            'loss': loss,
+            'loss_lattice': loss_lattice,
+            'loss_coord': loss_coord,
+            'loss_symmetrize': loss_symmetrize,
+        }
 
     @staticmethod
     def get_anneal_factor(t, slope: float = 0.0, offset: float = 0.0):
@@ -307,7 +324,7 @@ class CSPFlow(BaseModule):
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             pred_f = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=pred_f,
+                scaled_forces=pred_f,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
@@ -355,7 +372,7 @@ class CSPFlow(BaseModule):
             f_T = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f_T_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
             f_T = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=f_T,
+                scaled_forces=f_T,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,
