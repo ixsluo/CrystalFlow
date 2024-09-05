@@ -638,12 +638,18 @@ class CSPFlow(BaseModule):
 
         output_dict = self(batch)
 
+        loss_symmetrize = output_dict['loss_symmetrize']
         loss_lattice = output_dict['loss_lattice']
         loss_coord = output_dict['loss_coord']
         loss = output_dict['loss']
 
         self.log_dict(
-            {'train_loss': loss, 'lattice_loss': loss_lattice, 'coord_loss': loss_coord},
+            {
+                'train_loss': loss,
+                'lattice_loss': loss_lattice,
+                'coord_loss': loss_coord,
+                'symmetrize_loss': loss_symmetrize
+            },
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -684,11 +690,17 @@ class CSPFlow(BaseModule):
 
     def compute_stats(self, output_dict, prefix):
 
+        loss_symmetrize = output_dict['loss_symmetrize']
         loss_lattice = output_dict['loss_lattice']
         loss_coord = output_dict['loss_coord']
         loss = output_dict['loss']
 
-        log_dict = {f'{prefix}_loss': loss, f'{prefix}_lattice_loss': loss_lattice, f'{prefix}_coord_loss': loss_coord}
+        log_dict = {
+            f'{prefix}_loss': loss,
+            f'{prefix}_lattice_loss': loss_lattice,
+            f'{prefix}_coord_loss': loss_coord,
+            f'{prefix}_symmetrize_loss': loss_symmetrize,
+        }
 
         return log_dict, loss
 
