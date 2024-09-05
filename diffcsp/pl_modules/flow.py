@@ -251,14 +251,16 @@ class CSPFlow(BaseModule):
 
         if self.symmetrize_anchor:
             if self.lattice_polar:
-                pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
+                pred_l_sym = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
-            tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
+            #tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
             pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
             # for loss
-            tar_f = tar_f_anchor
-            pred_f = pred_f_anchor
+            #tar_f = tar_f_anchor
+            #pred_f = pred_f_anchor
+            pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
+            pred_f_sym = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], pred_f_anchor)
         elif self.symmetrize_rotavg:
             if self.lattice_polar:
                 pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
@@ -272,14 +274,16 @@ class CSPFlow(BaseModule):
                 num_general_ops=batch.num_general_ops,
             )
 
-        loss_lattice = F.mse_loss(pred_l, tar_l)
-        loss_coord = F.mse_loss(pred_f, tar_f)
+        loss_lattice = F.mse_loss(pred_l_sym, tar_l)
+        loss_coord = F.mse_loss(pred_f_sym, tar_f)
+        loss_lattice_sym =  F.mse_loss(pred_l, pred_l_sym)
+        loss_coord_sym = F.mse_loss(pred_f, pred_f_sym)
 
         cost_coord = self.hparams.cost_coord
         cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
-        loss = cost_lattice * loss_lattice + cost_coord * loss_coord
+        loss = cost_lattice * loss_lattice + cost_coord * loss_coord + cost_lattice * loss_lattice_sym + cost_coord * loss_coord_sym
 
-        return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord}
+        return {'loss': loss, 'loss_lattice': loss_lattice, 'loss_coord': loss_coord, 'loss_lattice_sym': loss_lattice_sym, 'loss_coord_sym': loss_coord_sym}
 
     @staticmethod
     def get_anneal_factor(t, slope: float = 0.0, offset: float = 0.0):
