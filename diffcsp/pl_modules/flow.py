@@ -120,8 +120,10 @@ class CSPFlow(BaseModule):
         self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
         self.symmetrize_anchor = self.hparams.get("symmetrize_anchor", False)
         self.symmetrize_rotavg = self.hparams.get("symmetrize_rotavg", False)
+        self.post_symmetrize = self.hparams.get("post_symmetrize", True)
         self.symm_rotavg = SymmetrizeRotavg()
-        self.cost_symmetrize = self.hparams.get("cost_symmetrize", 0.0)
+        self.cost_sym_lattice = self.hparams.get("cost_sym_lattice", self.hparams.cost_lattice)
+        self.cost_sym_coord = self.hparams.get("cost_sym_coord", self.hparams.cost_coord)
 
         if self.ot:
             hydra.utils.log.info("Using optimal transport")
@@ -250,21 +252,23 @@ class CSPFlow(BaseModule):
             lattices_mat=input_lattice_mat,
         )
 
-        if self.symmetrize_anchor:
+        if self.post_symmetrize and self.symmetrize_anchor:
             if self.lattice_polar:
-                pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
+                pred_l_symmetrized = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
             pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
             pred_f_symmetrized = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], pred_f_anchor)
-            loss_symmetrize = F.mse_loss(pred_f, pred_f_symmetrized)
+            loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
+            loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
             # for loss
+            pred_l = pred_l_symmetrized
             tar_f = tar_f_anchor
             pred_f = pred_f_anchor
-        elif self.symmetrize_rotavg:
+        elif self.post_symmetrize and self.symmetrize_rotavg:
             if self.lattice_polar:
-                pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
+                pred_l_symmetrized = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
             else:
                 raise NotImplementedError("symmetrize is not implemented for lattice matrix.")
             pred_f_symmetrized = self.symm_rotavg.symmetrize_rank1_scaled(
@@ -274,28 +278,32 @@ class CSPFlow(BaseModule):
                 symm_map=batch.symm_map,
                 num_general_ops=batch.num_general_ops,
             )
-            loss_symmetrize = F.mse_loss(pred_f, pred_f_symmetrized)
+            loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
+            loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
+            pred_l = pred_l_symmetrized
             pred_f = pred_f_symmetrized
         else:
-            loss_symmetrize = 0.0
+            loss_sym_l = 0.0
+            loss_sym_f = 0.0
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
 
         cost_coord = self.hparams.cost_coord
         cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
-        cost_symmetrize = self.cost_symmetrize
         loss = (
             cost_lattice * loss_lattice 
             + cost_coord * loss_coord 
-            + cost_symmetrize * loss_symmetrize
+            + self.cost_sym_lattice * loss_sym_l
+            + self.cost_sym_coord * loss_sym_f
         )
 
         return {
             'loss': loss,
             'loss_lattice': loss_lattice,
             'loss_coord': loss_coord,
-            'loss_symmetrize': loss_symmetrize,
+            'loss_sym_lattice': loss_sym_l,
+            'loss_sym_coord': loss_sym_f,
         }
 
     @staticmethod
@@ -638,17 +646,15 @@ class CSPFlow(BaseModule):
 
         output_dict = self(batch)
 
-        loss_symmetrize = output_dict['loss_symmetrize']
-        loss_lattice = output_dict['loss_lattice']
-        loss_coord = output_dict['loss_coord']
         loss = output_dict['loss']
 
         self.log_dict(
             {
                 'train_loss': loss,
-                'lattice_loss': loss_lattice,
-                'coord_loss': loss_coord,
-                'symmetrize_loss': loss_symmetrize
+                'lattice_loss': output_dict['loss_lattice'],
+                'coord_loss': output_dict['loss_coord'],
+                'sym_lattice_loss': output_dict['loss_sym_lattice'],
+                'sym_coord_loss': output_dict['loss_sym_coord'],
             },
             on_step=True,
             on_epoch=True,
@@ -689,17 +695,13 @@ class CSPFlow(BaseModule):
         return loss
 
     def compute_stats(self, output_dict, prefix):
-
-        loss_symmetrize = output_dict['loss_symmetrize']
-        loss_lattice = output_dict['loss_lattice']
-        loss_coord = output_dict['loss_coord']
         loss = output_dict['loss']
-
         log_dict = {
             f'{prefix}_loss': loss,
-            f'{prefix}_lattice_loss': loss_lattice,
-            f'{prefix}_coord_loss': loss_coord,
-            f'{prefix}_symmetrize_loss': loss_symmetrize,
+            f'{prefix}_lattice_loss': output_dict['loss_lattice'],
+            f'{prefix}_coord_loss': output_dict['loss_coord'],
+            f'{prefix}_sym_lattice_loss': output_dict['loss_sym_lattice'],
+            f'{prefix}_sym_coord_loss': output_dict['loss_sym_coord'],
         }
 
         return log_dict, loss
