@@ -13,13 +13,19 @@ class SymmetrizeRotavg(nn.Module):
 
     def symmetrize_rank1_scaled(
         self,
-        scaled_forces: torch.Tensor,
+        scaled_forces: torch.Tensor,      # (Nat, 3)
         num_atoms: torch.Tensor,
-        general_ops: torch.Tensor,
-        symm_map: list[list[list[int]]],  # (B,Nop,Nat)
-        num_general_ops: torch.Tensor,
+        general_ops: torch.Tensor,        # (192, 4, 4)
+        symm_map,                         # (Nat, 192)
+        num_general_ops: torch.Tensor,    # (B,)
     ):
         scaled_symmetrized_forces = torch.zeros_like(scaled_forces)
+        for iop, op in enumerate(general_ops):
+            transformed_forces = torch.einsum('ij,nj->ni', op[:3, :3], scaled_forces)
+            scaled_symmetrized_forces[symm_map[:, iop], :] += transformed_forces
+        scaled_symmetrized_forces /= num_general_ops.repeat_interleave(num_atoms, dim=0)[:, None]
+        return scaled_symmetrized_forces
+
         na_start = 0
         for na, nop, iops, isymm_map in zip(num_atoms, num_general_ops, general_ops.split(num_general_ops.tolist()), symm_map):
             for op, this_op_map in zip(iops, isymm_map):
