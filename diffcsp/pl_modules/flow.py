@@ -122,6 +122,7 @@ class CSPFlow(BaseModule):
         self.symmetrize_rotavg = self.hparams.get("symmetrize_rotavg", False)
         self.post_symmetrize = self.hparams.get("post_symmetrize", True)
         self.symm_rotavg = SymmetrizeRotavg()
+        self.use_symmetrize_loss = self.hparams.get("use_symmetrize_loss", False)
         self.cost_sym_lattice = self.hparams.get("cost_sym_lattice", self.hparams.cost_lattice)
         self.cost_sym_coord = self.hparams.get("cost_sym_coord", self.hparams.cost_coord)
 
@@ -252,6 +253,8 @@ class CSPFlow(BaseModule):
             lattices_mat=input_lattice_mat,
         )
 
+        loss_sym_l = 0.0
+        loss_sym_f = 0.0
         if self.post_symmetrize and self.symmetrize_anchor:
             if self.lattice_polar:
                 pred_l_symmetrized = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
@@ -260,8 +263,9 @@ class CSPFlow(BaseModule):
             tar_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, tar_f)
             pred_f_anchor = torch.einsum('bij,bj->bi', batch.ops_inv, pred_f)
             pred_f_symmetrized = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], pred_f_anchor)
-            loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
-            loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
+            if self.use_symmetrize_loss:
+                loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
+                loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
             # for loss
             pred_l = pred_l_symmetrized
             tar_f = tar_f_anchor
@@ -278,13 +282,11 @@ class CSPFlow(BaseModule):
                 symm_map=batch.symm_map,
                 num_general_ops=batch.num_general_ops,
             )
-            loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
-            loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
+            if self.use_symmetrize_loss:
+                loss_sym_l = F.mse_loss(pred_l, pred_l_symmetrized)
+                loss_sym_f = F.mse_loss(pred_f, pred_f_symmetrized)
             pred_l = pred_l_symmetrized
             pred_f = pred_f_symmetrized
-        else:
-            loss_sym_l = 0.0
-            loss_sym_f = 0.0
 
         loss_lattice = F.mse_loss(pred_l, tar_l)
         loss_coord = F.mse_loss(pred_f, tar_f)
