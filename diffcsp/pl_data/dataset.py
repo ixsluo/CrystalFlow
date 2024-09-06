@@ -131,13 +131,9 @@ class CrystDataset(Dataset):
             data.ops_inv = torch.linalg.pinv(data.ops[:,:3,:3])
             data.num_general_ops = len(data_dict['general_wyckoff_ops'])          # Nops
             data.general_ops = torch.Tensor(data_dict['general_wyckoff_ops'])     # (Nops, 4, 4)
-            # data.general_ops_inv = torch.linalg.inv(data.general_ops[:, :3, :3])  # (Nops, 3, 3)
-            data.symm_map = data_dict['symm_map'].tolist()                        # (Nops, Nat)
-
-            data.general_ops = F.pad(data.general_ops, (0, 0, 0, 0, 0, 192 - data.num_general_ops))  # (192, 4, 4)
-            # data.general_ops_inv = F.pad(data.general_ops_inv, (0, 0, 0, 0, 0, 192 - data.num_general_ops))  # (192, 3, 3)
-            data.symm_map = torch.LongTensor(data_dict['symm_map'])  # (Nops, Nat) -> (192, Nat)
-            data.symm_map = F.pad(data.symm_map, (0, 0, 0, 192 - data.num_general_ops)).transpose(-1, -2)
+            data.general_ops = F.pad(data.general_ops, (0, 0, 0, 0, 0, 192 - data.num_general_ops)).view(1, 192, 4, 4)
+            data.symm_map = torch.LongTensor(data_dict['symm_map'])               # (Nops, Nat)
+            data.symm_map = F.pad(data.symm_map, (0, 0, 0, 192 - data.num_general_ops)).transpose(-1, -2)  # (Nat, 192)
 
 
         if self.use_pos_index:
