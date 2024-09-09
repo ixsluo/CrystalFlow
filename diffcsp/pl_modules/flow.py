@@ -539,7 +539,7 @@ class CSPFlow(BaseModule):
             f_t = torch.einsum('bij,bj->bi', batch.ops[:, :3, :3], f_t_anchor) + batch.ops[:, :3, 3]
         elif self.symmetrize_rotavg:
             f_t = self.symm_rotavg.symmetrize_rank1_scaled(
-                forces=f_t,
+                scaled_forces=f_t,
                 num_atoms=batch.num_atoms,
                 general_ops=batch.general_ops,
                 symm_map=batch.symm_map,

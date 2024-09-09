@@ -77,6 +77,7 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+notebooks/
 
 # IPython
 profile_default/
@@ -164,3 +165,5 @@ singlerun/
 wandb/
 runs/
 clean/
+hydra/
+log/
