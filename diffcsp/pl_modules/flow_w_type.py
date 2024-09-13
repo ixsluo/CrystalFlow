@@ -222,7 +222,8 @@ class CSPFlow(BaseModule):
             ) + batch.ops[:, :3, 3]
 
         gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
-        rd_atom_types_onehot = torch.randint_like(batch.atom_types, 0, MAX_ATOMIC_NUM)
+        rd_atom_types = torch.randint_like(batch.atom_types, 0, MAX_ATOMIC_NUM)
+        rd_atom_types_onehot = F.one_hot(rd_atom_types, num_classes=MAX_ATOMIC_NUM).float()
 
         # optimal transport
         if self.ot:
@@ -244,7 +245,7 @@ class CSPFlow(BaseModule):
             input_lattice_mat = lattice_polar_build_torch(input_lattice_rep)
         else:
             input_lattice_mat = input_lattice_rep
-        input_atom_type_probs = gt_atom_types_onehot + times.repeat_interleave(batch.num_atoms) * tar_t
+        input_atom_type_probs = gt_atom_types_onehot + times.repeat_interleave(batch.num_atoms)[:, None] * tar_t
 
         # Replace inputs if fixed
         if self.keep_coords:
