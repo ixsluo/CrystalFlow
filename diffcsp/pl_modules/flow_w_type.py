@@ -671,6 +671,7 @@ class CSPFlow(BaseModule):
                 'train_loss': loss,
                 'lattice_loss': output_dict['loss_lattice'],
                 'coord_loss': output_dict['loss_coord'],
+                'type_loss': output_dict['loss_type'],
                 'sym_lattice_loss': output_dict['loss_sym_lattice'],
                 'sym_coord_loss': output_dict['loss_sym_coord'],
             },
