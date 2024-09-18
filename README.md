@@ -66,6 +66,7 @@ The ``<dataset>`` tag can be selected from perov_5, mp_20, mpts_52 and carbon_24
 #### Flow model
 
 optional command line parameters
+
 ```
 model=[flow|flow_polar]  # use direct lattice or polar-decomposition lattice
 +model.from_cubic=true  # sample lattice from cubic prior, only effect on flow_polar
@@ -77,12 +78,19 @@ model.cost_coord=10 model.cost_lattice=0.1  # fix coords or lattice if less than
 +model.ot=true  # use optimal transport, default false
 ```
 
+example for ab-init model training
+
+```
+model=flow_polar_w_type  # w_type
+model.cost_type=100 model.cost_coord=100 model.cost_lattice=1
+```
+
 
 ### Evaluation
 
 #### Stable structure prediction 
 
-One sample 
+One sample
 
 ```bash
 python scripts/evaluate.py --model_path <model_path> --dataset <dataset>
@@ -102,7 +110,7 @@ python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file
 
 #### Ab initio generation
 
-```
+```bash
 python scripts/generation.py --model_path <model_path> --dataset <dataset>
 python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv
 ```
@@ -110,7 +118,7 @@ python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file
 
 #### Sample from arbitrary composition
 
-```
+```bash
 python scripts/sample.py --model_path <model_path> --save_path <save_path> --formula <formula> --num_evals <num_evals>
 ```
 
@@ -151,6 +159,14 @@ done
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python ~/DiffCSP/scripts/sample_ode.py -m `pwd` -d sample -h
+```
+
+
+#### Flow model - ab-init generation
+
+```bash
+python scripts/generation.py --model_path <model_path> --dataset <dataset> --step_lr 0.01
+python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv
 ```
 
 ### Acknowledgments
