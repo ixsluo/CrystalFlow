@@ -405,6 +405,9 @@ class CSPFlow(BaseModule):
                 num_general_ops=batch.num_general_ops,
             ) + batch.ops[:, :3, 3]
 
+        rd_atom_types = torch.randint(0, MAX_ATOMIC_NUM, [batch.num_nodes]).to(self.device)
+        rd_atom_types_onehot = F.one_hot(rd_atom_types, num_classes=MAX_ATOMIC_NUM).float()
+
         #
         if self.keep_coords:
             f_T = batch.frac_coords
@@ -418,7 +421,7 @@ class CSPFlow(BaseModule):
         traj = {
             0: {
                 'num_atoms': batch.num_atoms,
-                'atom_types': batch.atom_types,
+                'atom_types': rd_atom_types + 1,
                 'frac_coords': f_T % 1.0,
                 'lattices': lattices_mat_T,
             }
@@ -427,6 +430,7 @@ class CSPFlow(BaseModule):
         lattices_mat_t = lattices_mat_T.clone().detach()
         l_t = l_T.clone().detach()
         f_t = f_T.clone().detach()
+        t_t = rd_atom_types_onehot.clone().detach()
 
         for t in tqdm(range(1, N + 1)):
 
@@ -439,9 +443,9 @@ class CSPFlow(BaseModule):
                 l_t = l_T
                 lattices_mat_t = lattices_mat_T
 
-            pred_l, pred_f = self.decoder(
+            pred_l, pred_f, pred_t = self.decoder(
                 t=time_emb,
-                atom_types=batch.atom_types,
+                atom_types=t_t,
                 frac_coords=f_t,
                 lattices_rep=l_t,
                 num_atoms=batch.num_atoms,
@@ -459,6 +463,7 @@ class CSPFlow(BaseModule):
             f_t = f_t + pred_f / N if not self.keep_coords else f_t
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
             f_t = f_t % 1.0
+            t_t = t_t + pred_t / N
 
             if self.lattice_polar:
                 lattices_mat_t = lattice_polar_build_torch(l_t)
@@ -467,14 +472,14 @@ class CSPFlow(BaseModule):
 
             traj[t] = {
                 'num_atoms': batch.num_atoms,
-                'atom_types': batch.atom_types,
+                'atom_types': torch.argmax(t_t, dim=-1) + 1,
                 'frac_coords': f_t,
                 'lattices': lattices_mat_t,
             }
 
         traj_stack = {
             'num_atoms': batch.num_atoms,
-            'atom_types': batch.atom_types,
+            'atom_types': torch.stack([traj[i]['atom_types'] for i in range(0, N + 1)]),
             'all_frac_coords': torch.stack([traj[i]['frac_coords'] for i in range(0, N + 1)]),
             'all_lattices': torch.stack([traj[i]['lattices'] for i in range(0, N + 1)]),
         }
@@ -648,6 +653,7 @@ class CSPFlow(BaseModule):
         anneal_slope=0.0, anneal_offset=0.0,
         **kwargs,
     ):
+        raise NotImplementedError("w_type ODE is not implemented")
         t_span = t_span.to(self.device)
         solver = str_to_solver(solver)
         if solver.stepping_class == "fixed":

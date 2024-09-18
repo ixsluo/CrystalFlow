@@ -117,8 +117,8 @@ def load_model(model_path, load_data=False, testing=True, test_bs=None):
             model.lattice_scaler = torch.load(model_path / 'lattice_scaler.pt')
             model.scalers = torch.load(model_path / 'prop_scalers.pt')
             model.scaler = torch.load(model_path / 'prop_scaler.pt')
-        except:
-            pass
+        except Exception as e:
+            print(e)
 
         if test_bs is not None:
             cfg.data.datamodule.batch_size.test = test_bs
