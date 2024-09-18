@@ -4,7 +4,6 @@
 import torch
 import torch.nn as nn
 from torch_scatter import scatter
-from torch_geometric.nn.acts import swish
 from torch_geometric.nn.inits import glorot_orthogonal
 from torch_geometric.nn.models.dimenet import (
     BesselBasisLayer,
@@ -12,6 +11,7 @@ from torch_geometric.nn.models.dimenet import (
     ResidualLayer,
     SphericalBasisLayer,
 )
+from torch_geometric.nn.resolver import activation_resolver
 from torch_sparse import SparseTensor
 
 from diffcsp.common.data_utils import (
@@ -24,6 +24,9 @@ try:
     import sympy as sym
 except ImportError:
     sym = None
+
+
+swish = activation_resolver('swish')
 
 
 class InteractionPPBlock(torch.nn.Module):
@@ -44,9 +47,7 @@ class InteractionPPBlock(torch.nn.Module):
         # Transformations of Bessel and spherical basis representations.
         self.lin_rbf1 = nn.Linear(num_radial, basis_emb_size, bias=False)
         self.lin_rbf2 = nn.Linear(basis_emb_size, hidden_channels, bias=False)
-        self.lin_sbf1 = nn.Linear(
-            num_spherical * num_radial, basis_emb_size, bias=False
-        )
+        self.lin_sbf1 = nn.Linear(num_spherical * num_radial, basis_emb_size, bias=False)
         self.lin_sbf2 = nn.Linear(basis_emb_size, int_emb_size, bias=False)
 
         # Dense transformations of input messages.
@@ -59,17 +60,11 @@ class InteractionPPBlock(torch.nn.Module):
 
         # Residual layers before and after skip connection.
         self.layers_before_skip = torch.nn.ModuleList(
-            [
-                ResidualLayer(hidden_channels, act)
-                for _ in range(num_before_skip)
-            ]
+            [ResidualLayer(hidden_channels, act) for _ in range(num_before_skip)]
         )
         self.lin = nn.Linear(hidden_channels, hidden_channels)
         self.layers_after_skip = torch.nn.ModuleList(
-            [
-                ResidualLayer(hidden_channels, act)
-                for _ in range(num_after_skip)
-            ]
+            [ResidualLayer(hidden_channels, act) for _ in range(num_after_skip)]
         )
 
         self.reset_parameters()
@@ -220,9 +215,7 @@ class DimeNetPlusPlus(torch.nn.Module):
         self.num_blocks = num_blocks
 
         self.rbf = BesselBasisLayer(num_radial, cutoff, envelope_exponent)
-        self.sbf = SphericalBasisLayer(
-            num_spherical, num_radial, cutoff, envelope_exponent
-        )
+        self.sbf = SphericalBasisLayer(num_spherical, num_radial, cutoff, envelope_exponent)
 
         self.emb = EmbeddingBlock(num_radial, hidden_channels, act)
 
@@ -272,9 +265,7 @@ class DimeNetPlusPlus(torch.nn.Module):
         # row, col = col, row  # Swap because my definition of edge_index is i->j
 
         value = torch.arange(row.size(0), device=row.device)
-        adj_t = SparseTensor(
-            row=col, col=row, value=value, sparse_sizes=(num_nodes, num_nodes)
-        )
+        adj_t = SparseTensor(row=col, col=row, value=value, sparse_sizes=(num_nodes, num_nodes))
         adj_t_row = adj_t[row]
         num_triplets = adj_t_row.set_value(None).sum(dim=1).to(torch.long)
 
@@ -350,11 +341,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             data.to_jimages = cell_offsets
             data.num_bonds = neighbors
 
-        pos = frac_to_cart_coords(
-            data.frac_coords,
-            data.lengths,
-            data.angles,
-            data.num_atoms)
+        pos = frac_to_cart_coords(data.frac_coords, data.lengths, data.angles, data.num_atoms)
 
         out = get_pbc_distances(
             data.frac_coords,
@@ -364,7 +351,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
             data.to_jimages,
             data.num_atoms,
             data.num_bonds,
-            return_offsets=True
+            return_offsets=True,
         )
 
         edge_index = out["edge_index"]
@@ -373,9 +360,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
 
         j, i = edge_index
 
-        _, _, idx_i, idx_j, idx_k, idx_kj, idx_ji = self.triplets(
-            edge_index, num_nodes=data.atom_types.size(0)
-        )
+        _, _, idx_i, idx_j, idx_k, idx_kj, idx_ji = self.triplets(edge_index, num_nodes=data.atom_types.size(0))
 
         # Calculate angles.
         pos_i = pos[idx_i].detach()
@@ -397,9 +382,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
         P = self.output_blocks[0](x, rbf, i, num_nodes=pos.size(0))
 
         # Interaction blocks.
-        for interaction_block, output_block in zip(
-            self.interaction_blocks, self.output_blocks[1:]
-        ):
+        for interaction_block, output_block in zip(self.interaction_blocks, self.output_blocks[1:]):
             x = interaction_block(x, rbf, sbf, idx_kj, idx_ji)
             P += output_block(x, rbf, i, num_nodes=pos.size(0))
 
@@ -411,6 +394,7 @@ class DimeNetPlusPlusWrap(DimeNetPlusPlus):
                 energy = P.sum(dim=0)
             elif self.readout == 'cat':
                 import pdb
+
                 pdb.set_trace()
                 energy = torch.cat([P.sum(dim=0), P.mean(dim=0)])
             else:
