@@ -74,7 +74,10 @@ train_dist = {
 }
 
 
-def diffusion(loader, model, step_lr):
+def diffusion(
+    loader, model, step_lr,
+    **sample_kwargs,
+):
 
     frac_coords = []
     num_atoms = []
@@ -85,7 +88,7 @@ def diffusion(loader, model, step_lr):
 
         if torch.cuda.is_available():
             batch.cuda()
-        outputs, traj = model.sample(batch, step_lr = step_lr)
+        outputs, traj = model.sample(batch, step_lr=step_lr, **sample_kwargs)
         frac_coords.append(outputs['frac_coords'].detach().cpu())
         num_atoms.append(outputs['num_atoms'].detach().cpu())
         atom_types.append(outputs['atom_types'].detach().cpu())
@@ -144,7 +147,11 @@ def main(args):
     print(step_lr)
 
     start_time = time.time()
-    (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(test_loader, model, step_lr)
+    (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(
+        test_loader, model, step_lr,
+        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords,
+        anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
+    )
 
     if args.label == '':
         gen_out_name = 'eval_gen.pt'
@@ -167,6 +174,10 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', required=True)
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--step_lr', default=-1, type=float)
+    parser.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
+    parser.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    parser.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
+    parser.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
     parser.add_argument('--num_batches_to_samples', default=20, type=int)
     parser.add_argument('--batch_size', default=500, type=int)
     parser.add_argument('--label', default='')
