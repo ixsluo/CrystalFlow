@@ -235,7 +235,7 @@ class CSPFlow(BaseModule):
         # Build time stamp t
         tar_l = lattices_rep_T - lattices_rep_0
         tar_f = (frac_coords - f0 - 0.5) % 1 - 0.5
-        tar_t = rd_atom_types_onehot - gt_atom_types_onehot
+        tar_t = gt_atom_types_onehot - rd_atom_types_onehot
 
         # Build input lattice rep/mat and input coords
         l_expand_dim = (slice(None),) + (None,) * (tar_l.dim() - 1)
@@ -245,7 +245,7 @@ class CSPFlow(BaseModule):
             input_lattice_mat = lattice_polar_build_torch(input_lattice_rep)
         else:
             input_lattice_mat = input_lattice_rep
-        input_atom_type_probs = gt_atom_types_onehot + times.repeat_interleave(batch.num_atoms)[:, None] * tar_t
+        input_atom_type_probs = rd_atom_types_onehot + times.repeat_interleave(batch.num_atoms)[:, None] * tar_t
 
         # Replace inputs if fixed
         if self.keep_coords:
