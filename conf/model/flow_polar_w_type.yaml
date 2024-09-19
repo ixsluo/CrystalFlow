@@ -11,6 +11,6 @@ lattice_polar: true
 
 
 defaults:
-  - decoder: cspnet
+  - decoder: cspnet_polar
   - beta_scheduler: cosine
   - sigma_scheduler: wrapped
