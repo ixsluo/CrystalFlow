@@ -149,7 +149,7 @@ def main(args):
     start_time = time.time()
     (frac_coords, atom_types, lattices, lengths, angles, num_atoms) = diffusion(
         test_loader, model, step_lr,
-        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords,
+        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_type=args.anneal_type,
         anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
     )
 
@@ -176,6 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--step_lr', default=-1, type=float)
     parser.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
     parser.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    parser.add_argument('--anneal_type', action="store_true", help="Anneal type.")
     parser.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
     parser.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
     parser.add_argument('--num_batches_to_samples', default=20, type=int)

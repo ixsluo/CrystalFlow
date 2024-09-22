@@ -331,9 +331,9 @@ class CSPFlow(BaseModule):
         return 1 + slope * F.relu(t - offset)
 
     def post_decoder_on_sample(
-        self, pred_l, pred_f,
+        self, pred_l, pred_f, pred_t,
         batch, t,
-        anneal_lattice=False, anneal_coords=False,
+        anneal_lattice=False, anneal_coords=False, anneal_type=False,
         anneal_slope=0.0, anneal_offset=0.0,
     ):
         if self.symmetrize_anchor:
@@ -361,12 +361,14 @@ class CSPFlow(BaseModule):
             pred_l *= anneal_factor
         if anneal_coords:
             pred_f *= anneal_factor
-        return pred_l, pred_f
+        if anneal_type:
+            pred_t *= anneal_factor
+        return pred_l, pred_f, pred_t
 
     @torch.no_grad()
     def sample(
         self, batch, step_lr=None, N=None,
-        anneal_lattice=False, anneal_coords=False,
+        anneal_lattice=False, anneal_coords=False, anneal_type=False,
         anneal_slope=0.0, anneal_offset=0.0,
         **kwargs,
     ):
@@ -453,10 +455,10 @@ class CSPFlow(BaseModule):
                 lattices_mat=lattices_mat_t,
             )
 
-            pred_l, pred_f = self.post_decoder_on_sample(
-                pred_l, pred_f,
+            pred_l, pred_f, pred_t = self.post_decoder_on_sample(
+                pred_l, pred_f, pred_t,
                 batch=batch, t=t,
-                anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
+                anneal_lattice=anneal_lattice, anneal_coords=anneal_coords, anneal_type=anneal_type,
                 anneal_slope=anneal_slope, anneal_offset=anneal_offset,
             )
 
