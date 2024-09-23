@@ -453,7 +453,7 @@ def main(args):
         gen_file_path = get_file_paths(args.root_path, 'gen', args.label)
         recon_file_path = get_file_paths(args.root_path, 'recon', args.label)
         crys_array_list, _ = get_crystal_array_list(gen_file_path, batch_idx = -2)
-        gen_crys = p_map(lambda x: Crystal(x, compute_fp=False), crys_array_list, num_cpus=args.njobs)
+        gen_crys = p_map(lambda x: Crystal(x), crys_array_list, num_cpus=args.njobs)
         if args.gt_file != '':
             csv = pd.read_csv(args.gt_file)
             gt_crys = p_map(get_gt_crys_ori, csv['cif'], num_cpus=args.njobs)
