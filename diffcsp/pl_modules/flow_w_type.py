@@ -222,8 +222,7 @@ class CSPFlow(BaseModule):
             ) + batch.ops[:, :3, 3]
 
         gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
-        rd_atom_types = torch.randint_like(batch.atom_types, 0, MAX_ATOMIC_NUM)
-        rd_atom_types_onehot = F.one_hot(rd_atom_types, num_classes=MAX_ATOMIC_NUM).float()
+        rd_atom_types_onehot = torch.randn_like(gt_atom_types_onehot)
 
         # optimal transport
         if self.ot:
@@ -407,8 +406,7 @@ class CSPFlow(BaseModule):
                 num_general_ops=batch.num_general_ops,
             ) + batch.ops[:, :3, 3]
 
-        rd_atom_types = torch.randint(0, MAX_ATOMIC_NUM, [batch.num_nodes]).to(self.device)
-        rd_atom_types_onehot = F.one_hot(rd_atom_types, num_classes=MAX_ATOMIC_NUM).float()
+        rd_atom_types_onehot = torch.randn((batch.num_nodes, MAX_ATOMIC_NUM), device=self.device)
 
         #
         if self.keep_coords:
@@ -423,7 +421,7 @@ class CSPFlow(BaseModule):
         traj = {
             0: {
                 'num_atoms': batch.num_atoms,
-                'atom_types': rd_atom_types + 1,
+                'atom_types': torch.argmax(rd_atom_types_onehot, dim=-1) + 1,
                 'frac_coords': f_T % 1.0,
                 'lattices': lattices_mat_T,
             }
