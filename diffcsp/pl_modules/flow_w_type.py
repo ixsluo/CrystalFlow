@@ -223,6 +223,7 @@ class CSPFlow(BaseModule):
 
         gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
         rd_atom_types_onehot = torch.randn_like(gt_atom_types_onehot)
+        rd_atom_types_onehot = F.softmax(rd_atom_types_onehot, dim=-1)
 
         # optimal transport
         if self.ot:
@@ -407,6 +408,7 @@ class CSPFlow(BaseModule):
             ) + batch.ops[:, :3, 3]
 
         rd_atom_types_onehot = torch.randn((batch.num_nodes, MAX_ATOMIC_NUM), device=self.device)
+        rd_atom_types_onehot = F.softmax(rd_atom_types_onehot, dim=-1)
 
         #
         if self.keep_coords:
