@@ -221,6 +221,7 @@ class CSPFlow(BaseModule):
                 num_general_ops=batch.num_general_ops,
             ) + batch.ops[:, :3, 3]
 
+        # types
         gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
         rd_atom_types_onehot = torch.randn_like(gt_atom_types_onehot)
 
