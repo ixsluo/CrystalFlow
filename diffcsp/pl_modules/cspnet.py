@@ -65,6 +65,7 @@ class CSPLayer(nn.Module):
         act_fn=nn.SiLU(),
         dis_emb=None,
         rec_emb=None,
+        na_emb=None,
         ln=False,
         ip=True,
     ):
@@ -73,12 +74,15 @@ class CSPLayer(nn.Module):
         self.dis_dim = 3
         self.dis_emb = dis_emb
         self.rec_emb = rec_emb
+        self.na_emb = na_emb
         self.ip = ip
 
         if dis_emb is not None:
             self.dis_dim = dis_emb.dim
         if rec_emb is not None:
             self.dis_dim += rec_emb.dim
+        if na_emb is not None:
+            self.dis_dim += na_emb.embedding_dim
 
         self.edge_mlp = nn.Sequential(
             nn.Linear(hidden_dim * 2 + lattice_dim + self.dis_dim, hidden_dim),
@@ -100,6 +104,7 @@ class CSPLayer(nn.Module):
         lattices_rep,
         edge_index,
         edge2graph,
+        num_atoms,
         frac_diff=None,
         lattices_mat=None,
     ):
@@ -118,6 +123,10 @@ class CSPLayer(nn.Module):
         if self.dis_emb is not None:
             frac_diff = self.dis_emb(frac_diff)
             inputs.append(frac_diff)
+
+        if self.na_emb is not None:
+            na_emb = self.na_emb(num_atoms.repeat_interleave(num_atoms, dim=0))[edge_index[0]]
+            inputs.append(na_emb)
 
         if self.ip:
             lattice_ips = lattices_rep @ lattices_rep.transpose(-1, -2)
@@ -139,14 +148,15 @@ class CSPLayer(nn.Module):
         return out
 
     def forward(
-        self, node_features, frac_coords, lattices_rep, edge_index, edge2graph, frac_diff=None, lattices_mat=None
+        self, node_features, frac_coords, lattices_rep, edge_index, edge2graph,
+        num_atoms, frac_diff=None, lattices_mat=None
     ):
 
         node_input = node_features
         if self.ln:
             node_features = self.layer_norm(node_input)
         edge_features = self.edge_model(
-            node_features, frac_coords, lattices_rep, edge_index, edge2graph, frac_diff, lattices_mat
+            node_features, frac_coords, lattices_rep, edge_index, edge2graph, num_atoms, frac_diff, lattices_mat
         )
         node_output = self.node_model(node_features, edge_features, edge_index)
         return node_input + node_output
@@ -163,10 +173,11 @@ class CSPNet(nn.Module):
         num_layers=4,
         max_atoms=100,
         act_fn='silu',
-        dis_emb='sin',
+        dis_emb='sin',  # fractional distance embedding
         num_freqs=10,
-        rec_emb='none',
+        rec_emb='none',  # reciprocal distance embedding
         num_millers=5,
+        na_emb=0,  # number of atoms embedding
         edge_style='fc',
         cutoff=6.0,
         max_neighbors=20,
@@ -181,24 +192,28 @@ class CSPNet(nn.Module):
         self.ip = ip
         self.smooth = smooth
         if self.smooth:
-            self.node_embedding = nn.Linear(max_atoms, hidden_dim)
+            self.node_embedding = nn.Linear(MAX_ATOMIC_NUM, hidden_dim)
         else:
-            self.node_embedding = nn.Embedding(max_atoms, hidden_dim)
+            self.node_embedding = nn.Embedding(MAX_ATOMIC_NUM, hidden_dim)
         self.atom_latent_emb = nn.Linear(hidden_dim + latent_dim, hidden_dim)
         if act_fn == 'silu':
             self.act_fn = nn.SiLU()
         if dis_emb == 'sin':
-            self.dis_emb = SinusoidsEmbedding(n_frequencies=num_freqs)
+            self.dis_emb = SinusoidsEmbedding(n_frequencies=num_freqs)  # no trainable params
         elif dis_emb == 'none':
             self.dis_emb = None
         else:
             raise ValueError(f"Unknown fractional distance embedding: {dis_emb=}")
         if rec_emb == "sin":
-            self.rec_emb = RecSinusoidsEmbedding(n_millers=num_millers)
+            self.rec_emb = RecSinusoidsEmbedding(n_millers=num_millers)  # no trainable params
         elif rec_emb == "none":
             self.rec_emb = None
         else:
             raise ValueError(f"Unknown reciprocal distance embedding: {rec_emb=}")
+        if na_emb > 0:
+            self.na_emb = nn.Embedding(max_atoms, na_emb)  # with trainable params, but same in each layer
+        else:
+            self.na_emb = None
 
         for i in range(0, num_layers):
             self.add_module(
@@ -209,6 +224,7 @@ class CSPNet(nn.Module):
                     act_fn=self.act_fn,
                     dis_emb=self.dis_emb,
                     rec_emb=self.rec_emb,
+                    na_emb=self.na_emb,
                     ln=ln,
                     ip=ip,
                 ),
@@ -380,6 +396,7 @@ class CSPNet(nn.Module):
                 lattices_rep,
                 edges,
                 edge2graph,
+                num_atoms=num_atoms,
                 frac_diff=frac_diff,
                 lattices_mat=lattices_mat,
             )

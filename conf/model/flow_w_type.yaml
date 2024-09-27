@@ -13,3 +13,6 @@ defaults:
   - decoder: cspnet
   - beta_scheduler: cosine
   - sigma_scheduler: wrapped
+  - _self_
+
+decoder:
