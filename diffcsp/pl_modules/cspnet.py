@@ -135,7 +135,11 @@ class CSPLayer(nn.Module):
         if self.use_angles:  # angles between edges and lattices vectors
             cart_diff = torch.einsum("ei,eij->ej", frac_diff, lattices_mat[edge2graph])  # (E,3)
             inner_dot = torch.einsum("ei,eji->ej", cart_diff, lattices_mat[edge2graph])  # (E,3)
-            cos_angles = inner_dot / torch.linalg.norm(inner_dot, axis=1)[:, None]  # (E,3)
+            # norm = torch.linalg.norm(cart_diff, axis=1)[:, None] \
+            #      * torch.linlag.norm(lattices_mat, dim=2)[edge2graph]  # (E,3)
+            norm = torch.linalg.norm(inner_dot, axis=1)[:, None]  # (E,1)
+            cos_angles = inner_dot / norm
+            cos_angles = torch.where(cos_angles.isnan(), 0, cos_angles)
             inputs.append(cos_angles)
 
         if self.ip:

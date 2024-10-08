@@ -689,6 +689,7 @@ class CSPFlow(BaseModule):
         )
 
         if loss.isnan():
+            raise RuntimeError("loss is nan!")
             return None
 
         return loss
