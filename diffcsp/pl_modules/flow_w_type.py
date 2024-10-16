@@ -44,6 +44,7 @@ from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
 from diffcsp.pl_modules.ode_solvers import str_to_solver
 from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
 from diffcsp.pl_modules.conditioning import MultiEmbedding
+from diffcsp.pl_modules.time_scheduler import TimeScheduler
 
 MAX_ATOMIC_NUM = 100
 
@@ -101,6 +102,7 @@ class CSPFlow(BaseModule):
         else:
             self.time_dim = self.hparams.time_dim
             self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
+        self.time_scheduler = TimeScheduler(self.hparams.get("time_scheduler", ""))
 
         self.decoder = hydra.utils.instantiate(
             self.hparams.decoder,
@@ -181,6 +183,7 @@ class CSPFlow(BaseModule):
 
         batch_size = batch.num_graphs
         times = torch.rand(batch_size, device=self.device)
+        times = self.time_scheduler(times)
         time_emb = self.time_embedding(times)
 
         guide_threshold = self.guide_threshold if guide_threshold is None else guide_threshold
