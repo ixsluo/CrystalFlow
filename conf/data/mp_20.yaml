@@ -3,6 +3,8 @@ prop: formation_energy_per_atom
 num_targets: 1
 properties:
   - formation_energy_per_atom
+conditions:
+  - formation_energy_per_atom
 niggli: true
 primitive: False
 graph_method: crystalnn

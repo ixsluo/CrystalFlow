@@ -36,6 +36,9 @@ from diffcsp.common.data_utils import (
 from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
 from diffcsp.pl_modules.hungarian import HungarianMatcher
+from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
+from diffcsp.pl_modules.ode_solvers import str_to_solver
+from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
 
 MAX_ATOMIC_NUM = 100
 
@@ -78,12 +81,26 @@ class SinusoidalTimeEmbeddings(nn.Module):
         return embeddings
 
 
+class DirectUnsqueezeTime(nn.Module):
+    def forward(self, time: torch.Tensor):
+        return time.unsqueeze(-1)
+
+
 class CSPFlow(BaseModule):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        if self.hparams.time_dim == 0:
+            self.time_dim = 1
+            self.time_embedding = DirectUnsqueezeTime()
+        else:
+            self.time_dim = self.hparams.time_dim
+            self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
+
         self.decoder = hydra.utils.instantiate(
-            self.hparams.decoder, latent_dim=self.hparams.latent_dim + self.hparams.time_dim, _recursive_=False
+            self.hparams.decoder,
+            latent_dim=self.hparams.latent_dim + self.time_dim,
+            _recursive_=False,
         )
         self.beta_scheduler = hydra.utils.instantiate(self.hparams.beta_scheduler)
         self.sigma_scheduler = hydra.utils.instantiate(self.hparams.sigma_scheduler)
@@ -95,7 +112,37 @@ class CSPFlow(BaseModule):
         self.permute_l = HungarianMatcher("norm")
         self.permute_f = HungarianMatcher("norm_mic")
         self.lattice_polar = self.hparams.get("lattice_polar", False)
+        self.lattice_polar_sigma = self.hparams.get("lattice_polar_sigma", 1.0)
+        self.latticedecompnn = LatticeDecompNN()
+        self.from_cubic = self.hparams.get("from_cubic", False)
+        self.lattice_teacher_forcing = self.hparams.get("lattice_teacher_forcing", -1)
+        self.symmetrize_anchor = self.hparams.get("symmetrize_anchor", False)
+        self.symmetrize_rotavg = self.hparams.get("symmetrize_rotavg", False)
+        self.post_symmetrize = self.hparams.get("post_symmetrize", True)
+        self.symm_rotavg = SymmetrizeRotavg()
+        self.use_symmetrize_loss = self.hparams.get("use_symmetrize_loss", False)
+        self.cost_sym_lattice = self.hparams.get("cost_sym_lattice", self.hparams.cost_lattice)
+        self.cost_sym_coord = self.hparams.get("cost_sym_coord", self.hparams.cost_coord)
         self.guide_threshold = self.hparams.get("guide_threshold", 1.0)
+
+        if self.ot:
+            hydra.utils.log.info("Using optimal transport")
+        if self.lattice_polar:
+            hydra.utils.log.info(f"Using lattice polar decomposition with sigma={self.lattice_polar_sigma}")
+        if self.from_cubic:
+            hydra.utils.log.info("Using cubic lattice")
+        if self.lattice_teacher_forcing > 0:
+            hydra.utils.log.info(f"Using lattice_teacher_forcing={self.lattice_teacher_forcing}")
+        if self.symmetrize_anchor:
+            hydra.utils.log.info("Using symmetrize_anchor")
+        if self.symmetrize_rotavg:
+            hydra.utils.log.info("Using symmetrize_rotavg")
+        if self.symmetrize_anchor and self.symmetrize_rotavg:
+            raise ValueError("You can only specify one symmetrize method from anchor|rotavg")
+        if self.keep_lattice:
+            hydra.utils.log.warning(f"cost_lattice={self.hparams.cost_lattice}, setting to keep lattice.")
+        if self.keep_coords:
+            hydra.utils.log.warning(f"cost_coords={self.hparams.cost_coord}, setting to keep coords.")
 
     def sample_lengths(self, num_atoms, batch_size):
         loc = math.log(2)
@@ -115,15 +162,16 @@ class CSPFlow(BaseModule):
         return l0
 
     def sample_lattice_polar(self, batch_size):
-        l0 = torch.randn([batch_size, 6], device=self.device)
+        l0 = torch.randn([batch_size, 6], device=self.device) * self.lattice_polar_sigma
         l0[:, -1] = l0[:, -1] + 1
+        if self.from_cubic:
+            l0[:, :5] = 0
         return l0
 
     def forward(self, batch, guide_threshold=None):
 
         batch_size = batch.num_graphs
-        eps = 1e-3
-        times = torch.rand(batch_size, device=self.device) * (1 - eps) + eps  # [eps, 1]
+        times = torch.rand(batch_size, device=self.device)
         time_emb = self.time_embedding(times)
 
         guide_threshold = self.guide_threshold if guide_threshold is None else guide_threshold

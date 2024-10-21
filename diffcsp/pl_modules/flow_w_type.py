@@ -43,6 +43,7 @@ from diffcsp.pl_modules.hungarian import HungarianMatcher
 from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
 from diffcsp.pl_modules.ode_solvers import str_to_solver
 from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
+from diffcsp.pl_modules.conditioning import MultiEmbedding
 
 MAX_ATOMIC_NUM = 100
 
@@ -127,6 +128,8 @@ class CSPFlow(BaseModule):
         self.use_symmetrize_loss = self.hparams.get("use_symmetrize_loss", False)
         self.cost_sym_lattice = self.hparams.get("cost_sym_lattice", self.hparams.cost_lattice)
         self.cost_sym_coord = self.hparams.get("cost_sym_coord", self.hparams.cost_coord)
+        self.guide_threshold = self.hparams.get("guide_threshold", None)
+        self.cond_emb = MultiEmbedding(self.hparams.conditions)
 
         if self.ot:
             hydra.utils.log.info("Using optimal transport")
@@ -174,11 +177,19 @@ class CSPFlow(BaseModule):
             l0[:, :5] = 0
         return l0
 
-    def forward(self, batch):
+    def forward(self, batch, guide_threshold):
 
         batch_size = batch.num_graphs
         times = torch.rand(batch_size, device=self.device)
         time_emb = self.time_embedding(times)
+
+        guide_threshold = self.guide_threshold if guide_threshold is None else guide_threshold
+        if guide_threshold is None:
+            cemb = None
+            guide_indicator = None
+        else:
+            cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
+            guide_indicator = (torch.rand(batch_size, device=self.device) - guide_threshold).heaviside(torch.tensor(1.0))
 
         # Build time stamp T and 0
         # lattice
@@ -263,6 +274,7 @@ class CSPFlow(BaseModule):
             num_atoms=batch.num_atoms,
             node2graph=batch.batch,
             lattices_mat=input_lattice_mat,
+            cemb=cemb, guide_indicator=guide_indicator,
         )
 
         loss_sym_l = 0.0
@@ -370,12 +382,17 @@ class CSPFlow(BaseModule):
         self, batch, step_lr=None, N=None,
         anneal_lattice=False, anneal_coords=False, anneal_type=False,
         anneal_slope=0.0, anneal_offset=0.0,
+        guide_threshold=None,
         **kwargs,
     ):
         if N is None:
             N = round(1 / step_lr)
 
         batch_size = batch.num_graphs
+
+        if guide_threshold is not None:
+            cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
+            guide_indicator = torch.ones(batch_size, device=self.device)
 
         # time stamp T
         if self.lattice_polar:
@@ -452,17 +469,38 @@ class CSPFlow(BaseModule):
                 num_atoms=batch.num_atoms,
                 node2graph=batch.batch,
                 lattices_mat=lattices_mat_t,
+                cemb=None, guide_indicator=None,
             )
-
             pred_l, pred_f, pred_t = self.post_decoder_on_sample(
                 pred_l, pred_f, pred_t,
                 batch=batch, t=t,
                 anneal_lattice=anneal_lattice, anneal_coords=anneal_coords, anneal_type=anneal_type,
                 anneal_slope=anneal_slope, anneal_offset=anneal_offset,
             )
+            if guide_threshold is not None:
+                pred_l_guide, pred_f_guide, pred_t_guide = self.decoder(
+                    t=time_emb,
+                    atom_types=batch.atom_types,
+                    frac_coords=f_t,
+                    lattices_rep=l_t,
+                    num_atoms=batch.num_atoms,
+                    node2graph=batch.batch,
+                    lattices_mat=lattices_mat_t,
+                    cemb=cemb, guide_indicator=guide_indicator,
+                )
+                pred_l_guide, pred_f_guide, pred_t_guide = self.post_decoder_on_sample(
+                    pred_l_guide, pred_f_guide, pred_t_guide,
+                    batch=batch, t=t,
+                    anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
+                    anneal_slope=anneal_slope, anneal_offset=anneal_offset,
+                )
+                pred_l = (1 - guide_threshold) * pred_l_guide + guide_threshold * pred_l
+                pred_f = (1 - guide_threshold) * pred_f_guide + guide_threshold * pred_f
+                pred_t = (1 - guide_threshold) * pred_t_guide + guide_threshold * pred_t
 
-            f_t = f_t + pred_f / N if not self.keep_coords else f_t
+
             l_t = l_t + pred_l / N if not self.keep_lattice else l_t
+            f_t = f_t + pred_f / N if not self.keep_coords else f_t
             f_t = f_t % 1.0
             t_t = t_t + pred_t / N
 

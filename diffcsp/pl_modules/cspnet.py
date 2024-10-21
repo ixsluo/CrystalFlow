@@ -402,8 +402,8 @@ class CSPNet(nn.Module):
             if cemb is not None:
                 cemb_mixin = self._modules["cemb_mixin_%d" % i]
                 cemb_adapter = self._modules["cemb_adapter_%d" % i]
-                cemb = (cemb_mixin(cemb_adapter(cemb)) * guide_indicator[:, None]).repeat_interleave(num_atoms, dim=0)
-                node_features = node_features + cemb
+                cemb_bias = (cemb_mixin(cemb_adapter(cemb)) * guide_indicator[:, None]).repeat_interleave(num_atoms, dim=0)
+                node_features = node_features + cemb_bias
             # csp layer
             csp_layer = self._modules["csp_layer_%d" % i]
             node_features = csp_layer(
