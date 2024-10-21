@@ -329,7 +329,7 @@ class CSPFlow(BaseModule):
 
         cost_coord = self.hparams.cost_coord
         cost_lattice = 0.0 if lattice_teacher_forcing else self.hparams.cost_lattice
-        cost_type    = 0.0 if self.pred_type          else self.hparams.cost_type
+        cost_type    = 0.0 if not self.pred_type      else self.hparams.cost_type
         loss = (
               cost_lattice * loss_lattice
             + cost_coord   * loss_coord
