@@ -6,7 +6,8 @@ from tqdm import tqdm
 from torch.optim import Adam
 from pathlib import Path
 from types import SimpleNamespace
-from torch_geometric.data import Data, Batch, DataLoader
+from torch_geometric.data import Data, Batch
+from torch_geometric.loader import DataLoader
 from torch.utils.data import Dataset
 from eval_utils import load_model, lattices_to_params_shape, get_crystals_list, recommand_step_lr
 
