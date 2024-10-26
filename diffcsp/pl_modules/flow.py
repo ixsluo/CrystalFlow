@@ -104,12 +104,17 @@ class CSPFlow(BaseModule):
             self.time_embedding = SinusoidalTimeEmbeddings(self.time_dim)
 
         self.guide_threshold = self.hparams.get("guide_threshold", None)
-        self.cond_emb = MultiEmbedding(**self.hparams.conditions)
+        if self.guide_threshold is not None:
+            self.cond_emb = MultiEmbedding(**self.hparams.conditions)
+            cemb_dim = self.cond_emb.n_out
+        else:
+            self.cond_emb = None
+            cemb_dim = 1
         self.pred_type = self.hparams.decoder.pred_type
         self.decoder = hydra.utils.instantiate(
             self.hparams.decoder,
             latent_dim=self.hparams.latent_dim + self.time_dim,  # 0 + time
-            cemb_dim=self.cond_emb.n_out if self.guide_threshold else 1,
+            cemb_dim=cemb_dim,
             _recursive_=False,
         )
         self.beta_scheduler = hydra.utils.instantiate(self.hparams.beta_scheduler)
@@ -186,6 +191,8 @@ class CSPFlow(BaseModule):
             cemb = None
             guide_indicator = None
         else:
+            if self.cond_emb is None:
+                raise Exception("Model is not initialized with guidance")
             cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
             guide_indicator = (torch.rand(batch_size, device=self.device) - guide_threshold).heaviside(torch.tensor(1.0))
 
@@ -412,6 +419,8 @@ class CSPFlow(BaseModule):
             raise ValueError("Model is not trained with guidance but trying to sample with guidance.")
 
         if guide_factor is not None:
+            if self.cond_emb is None:
+                raise Exception("Model is not trained with guidance")
             cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
             guide_indicator = torch.ones(batch_size, device=self.device)
 
