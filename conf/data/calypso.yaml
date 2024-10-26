@@ -4,6 +4,8 @@ num_targets: 1
 properties:
   - enthalpy_per_atom
   - pressure
+conditions:
+  - pressure
 niggli: true
 primitive: False
 graph_method: crystalnn
@@ -80,6 +82,6 @@ datamodule:
     test: 0
 
   batch_size:
-    train: 256
+    train: 128
     val: 128
     test: 128
