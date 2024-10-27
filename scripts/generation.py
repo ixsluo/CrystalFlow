@@ -148,7 +148,7 @@ def main(args):
     if args.guide_factor is not None:
         conditions = parse_conditions(args.conditions)
     else:
-        conditions = None
+        conditions = {}
 
     if torch.cuda.is_available():
         model.to('cuda')
