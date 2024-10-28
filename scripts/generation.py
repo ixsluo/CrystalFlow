@@ -122,7 +122,10 @@ class SampleDataset(Dataset):
         data = Data(
             num_atoms=torch.LongTensor([num_atom]),
             num_nodes=num_atom,
-            **self.conditions,
+            **{
+                key: val.view(1, -1)
+                for key, val in self.conditions.items()
+            },
         )
         if self.is_carbon:
             data.atom_types = torch.LongTensor([6] * num_atom)
@@ -138,6 +141,7 @@ def parse_conditions(cond_string: str) -> dict:
         else:
             val = float(val)
         conditions[key] = val
+    return conditions
 
 
 def main(args):
@@ -148,7 +152,8 @@ def main(args):
     if args.guide_factor is not None:
         conditions = parse_conditions(args.conditions)
         for k, v in conditions.items():
-            conditions[k] = model.scalers[k].transform(v)
+            scaler_index = cfg.data.properties.index(k)
+            conditions[k] = model.scalers[scaler_index].transform(v)
     else:
         conditions = {}
 
