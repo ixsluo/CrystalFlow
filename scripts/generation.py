@@ -147,6 +147,8 @@ def main(args):
 
     if args.guide_factor is not None:
         conditions = parse_conditions(args.conditions)
+        for k, v in conditions.items():
+            conditions[k] = model.scalers[k].transform(v)
     else:
         conditions = {}
 
