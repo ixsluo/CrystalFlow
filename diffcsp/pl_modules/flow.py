@@ -110,7 +110,7 @@ class CSPFlow(BaseModule):
         else:
             self.cond_emb = None
             cemb_dim = 1
-        self.pred_type = self.hparams.decoder.pred_type
+        self.pred_type = self.hparams.decoder.get('pred_type', False)
         self.decoder = hydra.utils.instantiate(
             self.hparams.decoder,
             latent_dim=self.hparams.latent_dim + self.time_dim,  # 0 + time
@@ -491,7 +491,8 @@ class CSPFlow(BaseModule):
 
         for t in tqdm(range(1, N + 1)):
 
-            times = torch.full((batch_size,), t, device=self.device) / N
+            t_stamp = t / N
+            times = torch.full((batch_size,), t_stamp, device=self.device)
             time_emb = self.time_embedding(times)
 
             if self.keep_coords:
@@ -513,7 +514,7 @@ class CSPFlow(BaseModule):
             )
             pred = self.post_decoder_on_sample(
                 pred,
-                batch=batch, t=t,
+                batch=batch, t=t_stamp,
                 anneal_lattice=anneal_lattice, anneal_coords=anneal_coords, anneal_type=anneal_type,
                 anneal_slope=anneal_slope, anneal_offset=anneal_offset,
             )
@@ -535,7 +536,7 @@ class CSPFlow(BaseModule):
                 )
                 pred = self.post_decoder_on_sample(
                     pred,
-                    batch=batch, t=t,
+                    batch=batch, t=t_stamp,
                     anneal_lattice=anneal_lattice, anneal_coords=anneal_coords,
                     anneal_slope=anneal_slope, anneal_offset=anneal_offset,
                 )
