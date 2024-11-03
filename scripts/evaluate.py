@@ -20,8 +20,7 @@ import copy
 import numpy as np
 
 
-def diffusion(loader, model, num_evals, step_lr = 1e-5):
-
+def diffusion(loader, model, num_evals, **sample_kwargs):
     frac_coords = []
     num_atoms = []
     atom_types = []
@@ -38,7 +37,7 @@ def diffusion(loader, model, num_evals, step_lr = 1e-5):
         for eval_idx in range(num_evals):
 
             print(f'batch {idx} / {len(loader)}, sample {eval_idx} / {num_evals}')
-            outputs, traj = model.sample(batch, step_lr = step_lr)
+            outputs, traj = model.sample(batch, **sample_kwargs)
             batch_frac_coords.append(outputs['frac_coords'].detach().cpu())
             batch_num_atoms.append(outputs['num_atoms'].detach().cpu())
             batch_atom_types.append(outputs['atom_types'].detach().cpu())
@@ -70,20 +69,24 @@ def main(args):
     # load_data if do reconstruction.
     model_path = Path(args.model_path)
     model, test_loader, cfg = load_model(
-        model_path, load_data=True)
+        model_path, load_data=True, test_bs=args.test_bs)
 
     if torch.cuda.is_available():
         model.to('cuda')
 
-
     print('Evaluate the diffusion model.')
 
+    if args.ode_int_steps is not None:
+        args.step_lr = 1 / args.ode_int_steps
     step_lr = args.step_lr if args.step_lr >= 0 else recommand_step_lr['csp' if args.num_evals == 1 else 'csp_multi'][args.dataset]
-
 
     start_time = time.time()
     (frac_coords, atom_types, lattices, lengths, angles, num_atoms, input_data_batch) = diffusion(
-        test_loader, model, args.num_evals, step_lr)
+        test_loader, model, num_evals=args.num_evals,
+        step_lr=step_lr, N=args.ode_int_steps,
+        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_type=args.anneal_type, anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
+        guide_factor=args.guide_factor,
+    )
 
     if args.label == '':
         diff_out_name = 'eval_diff.pt'
@@ -105,9 +108,24 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m', '--model_path', required=True)
-    parser.add_argument('--dataset', required=True)
-    parser.add_argument('--step_lr', default=-1, type=float, help="Step interval for ODE/SDE, -1 for SDE dataset defaults.")
-    parser.add_argument('--num_evals', default=1, type=int, help="num repeat for each sample.")
-    parser.add_argument('--label', default='')
+    parser.add_argument('--num_evals', metavar='NEVAL', default=1, type=int, help="num repeat for each sample.")
+    parser.add_argument('--test_bs', type=int, help="overwrite testset batchsize.")
+    parser.add_argument('--label', default='', help="label for output")
+
+    step_group = parser.add_argument_group('evaluate step')
+    step_group.add_argument('--dataset', help='load default step_lr of which dataset; effect when step_lr is -1')
+    step_group.add_argument('--step_lr', default=-1, type=float, help="Step interval for ODE/SDE, -1 for SDE dataset defaults.")
+    step_group.add_argument('-N', '--ode-int-steps', metavar='N', default=None, type=int, help="ODE integrate steps number; overwrite step_lr (default: None)")
+
+    anneal_group = parser.add_argument_group('annealing')
+    anneal_group.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
+    anneal_group.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    anneal_group.add_argument('--anneal_type', action="store_true", help="Anneal type.")
+    anneal_group.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
+    anneal_group.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
+
+    guidance_group = parser.add_argument_group('guidance')
+    guidance_group.add_argument('--guide-factor', type=float, help='guidance factor (default: None)')
+
     args = parser.parse_args()
     main(args)

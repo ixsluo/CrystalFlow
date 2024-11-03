@@ -1,4 +1,4 @@
-_target_: diffcsp.pl_modules.flow_w_type.CSPFlow
+_target_: diffcsp.pl_modules.flow.CSPFlow
 time_dim: 256
 latent_dim: 0
 cost_type: 1.
@@ -13,6 +13,10 @@ defaults:
   - decoder: cspnet
   - beta_scheduler: cosine
   - sigma_scheduler: wrapped
+  - conditions: default
   - _self_
 
 decoder:
+  pred_type: true
+  smooth: ${model.decoder.pred_type}
+  smooth: true

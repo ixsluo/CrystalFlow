@@ -1,0 +1,101 @@
+cond_keys: ${data.conditions}
+
+types:
+  energy_per_atom:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: energy_per_atom
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  enthalpy_per_atom:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: enthalpy_per_atom
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  energy:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: energy
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  enthalpy:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: enthalpy
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  formation_energy_per_atom:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: formation_energy_per_atom
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  pressure:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: pressure
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -2
+    stop: 2
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
+
+  # [1, 230] -> [-1, 1], (n - 115.5) / 115
+  spgno:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: spgno
+    batch_norm: false
+    no_expansion: false
+    n_basis: 50
+    start: -1
+    stop: 1
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128

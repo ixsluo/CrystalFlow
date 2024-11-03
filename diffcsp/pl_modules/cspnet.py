@@ -68,6 +68,7 @@ class CSPLayer(nn.Module):
         na_emb=None,
         ln=False,
         ip=True,
+        use_angles=False,
     ):
         super(CSPLayer, self).__init__()
 
@@ -76,6 +77,7 @@ class CSPLayer(nn.Module):
         self.rec_emb = rec_emb
         self.na_emb = na_emb
         self.ip = ip
+        self.use_angles = use_angles
 
         if dis_emb is not None:
             self.dis_dim = dis_emb.dim
@@ -83,6 +85,8 @@ class CSPLayer(nn.Module):
             self.dis_dim += rec_emb.dim
         if na_emb is not None:
             self.dis_dim += na_emb.embedding_dim
+        if use_angles:
+            self.dis_dim += 3
 
         self.edge_mlp = nn.Sequential(
             nn.Linear(hidden_dim * 2 + lattice_dim + self.dis_dim, hidden_dim),
@@ -117,16 +121,26 @@ class CSPLayer(nn.Module):
             frac_diff = (xj - xi) % 1.0
 
         if self.rec_emb is not None:
-            cart_diff = self.rec_emb(frac_diff, lattices_mat[edge2graph])
-            inputs.append(cart_diff)
+            rec_diff = self.rec_emb(frac_diff, lattices_mat[edge2graph])
+            inputs.append(rec_diff)
 
         if self.dis_emb is not None:
-            frac_diff = self.dis_emb(frac_diff)
-            inputs.append(frac_diff)
+            frac_diff_emb = self.dis_emb(frac_diff)
+            inputs.append(frac_diff_emb)
 
         if self.na_emb is not None:
             na_emb = self.na_emb(num_atoms.repeat_interleave(num_atoms, dim=0))[edge_index[0]]
             inputs.append(na_emb)
+
+        if self.use_angles:  # angles between edges and lattices vectors
+            cart_diff = torch.einsum("ei,eij->ej", frac_diff, lattices_mat[edge2graph])  # (E,3)
+            inner_dot = torch.einsum("ei,eji->ej", cart_diff, lattices_mat[edge2graph])  # (E,3)
+            # norm = torch.linalg.norm(cart_diff, axis=1)[:, None] \
+            #      * torch.linlag.norm(lattices_mat, dim=2)[edge2graph]  # (E,3)
+            norm = torch.linalg.norm(inner_dot, axis=1)[:, None]  # (E,1)
+            cos_angles = inner_dot / norm
+            cos_angles = torch.where(cos_angles.isnan(), 0, cos_angles)
+            inputs.append(cos_angles)
 
         if self.ip:
             lattice_ips = lattices_rep @ lattices_rep.transpose(-1, -2)
@@ -183,6 +197,7 @@ class CSPNet(nn.Module):
         max_neighbors=20,
         ln=False,
         ip=True,
+        use_angles=False,
         smooth=False,
         pred_type=False,
         pred_scalar=False,
@@ -227,6 +242,7 @@ class CSPNet(nn.Module):
                     na_emb=self.na_emb,
                     ln=ln,
                     ip=ip,
+                    use_angles=use_angles,
                 ),
             )
             self.add_module(
@@ -386,8 +402,8 @@ class CSPNet(nn.Module):
             if cemb is not None:
                 cemb_mixin = self._modules["cemb_mixin_%d" % i]
                 cemb_adapter = self._modules["cemb_adapter_%d" % i]
-                cemb = (cemb_mixin(cemb_adapter(cemb)) * guide_indicator[:, None]).repeat_interleave(num_atoms, dim=0)
-                node_features = node_features + cemb
+                cemb_bias = (cemb_mixin(cemb_adapter(cemb)) * guide_indicator[:, None]).repeat_interleave(num_atoms, dim=0)
+                node_features = node_features + cemb_bias
             # csp layer
             csp_layer = self._modules["csp_layer_%d" % i]
             node_features = csp_layer(
