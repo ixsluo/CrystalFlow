@@ -1,3 +1,5 @@
+# generation for abinit
+
 import time
 import argparse
 import torch
@@ -189,6 +191,7 @@ def main(args):
         'atom_types': atom_types,
         'lengths': lengths,
         'angles': angles,
+        'time': time.time() - start_time,
     }, model_path / gen_out_name)
 
 

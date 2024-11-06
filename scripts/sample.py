@@ -1,3 +1,5 @@
+# Sample structures for CSP
+
 import argparse
 import os
 import time
@@ -49,7 +51,7 @@ chemical_symbols = [
     'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
     'Lv', 'Ts', 'Og']  # fmt: skip
 
-def diffusion(loader, model, step_lr, return_traj):
+def diffusion(loader, model, return_traj, **sample_kwargs):
 
     frac_coords = []
     num_atoms = []
@@ -66,7 +68,7 @@ def diffusion(loader, model, step_lr, return_traj):
 
         if torch.cuda.is_available():
             batch.cuda()
-        outputs, traj = model.sample(batch, step_lr = step_lr)
+        outputs, traj = model.sample(batch, **sample_kwargs)
         frac_coords.append(outputs['frac_coords'].detach().cpu())
         num_atoms.append(outputs['num_atoms'].detach().cpu())
         atom_types.append(outputs['atom_types'].detach().cpu())
@@ -103,11 +105,11 @@ def diffusion(loader, model, step_lr, return_traj):
     )
 
 class SampleDataset(Dataset):
-
-    def __init__(self, formula, num_evals):
+    def __init__(self, formula, num_evals, conditions: dict):
         super().__init__()
         self.formula = formula
         self.num_evals = num_evals
+        self.conditions = conditions
         self.get_structure()
 
     def get_structure(self):
@@ -126,6 +128,10 @@ class SampleDataset(Dataset):
             atom_types=torch.LongTensor(self.chem_list),
             num_atoms=len(self.chem_list),
             num_nodes=len(self.chem_list),
+            **{
+                key: val.view(1, -1)
+                for key, val in self.conditions.items()
+            },
         )
 
 
@@ -162,19 +168,34 @@ def load_formula_tabular_file(formula_file):
     formula_tabular = pd.read_csv(formula_file, sep=r'\s+', header=header)
     if header is None:
         print("Assume first column as formulas")
-        formula_list = formula_tabular[0].astype(str).tolist()
+        formula_tabular.columns.values[0] = "formula"
         if len(formula_tabular.columns) > 1:
             print("Assume second column as num_evals")
-            num_evals_list = formula_tabular[1].astype(int).tolist()
-        else:
-            num_evals_list = None
+            formula_tabular.columns.values[1] = "num_evals"
+    num_row = len(formula_tabular)
+    formula_tabular = formula_tabular.drop_duplicates("formula")
+    if len(formula_tabular) < num_row:
+        print("Only the first row of duplicated formula is preserved to avoid overwriting.")
+
+    formula_list = formula_tabular["formula"].tolist()
+    if "num_evals" in formula_tabular.columns:
+        num_evals_list = formula_tabular["num_evals"].astype(int).tolist()
     else:
-        formula_list = formula_tabular["formula"].tolist()
-        if "num_evals" in formula_tabular.columns:
-            num_evals_list = formula_tabular["num_evals"].astype(int).tolist()
-        else:
-            num_evals_list = None
+        num_evals_list = None
+
     return formula_list, num_evals_list
+
+
+def parse_conditions(cond_string: str) -> dict:
+    conditions = {}
+    for cond in cond_string.split(';'):
+        key, val = cond.split('=', 1)
+        if ',' in val:
+            raise ValueError("vector condition is not supported yet")
+        else:
+            val = float(val)
+        conditions[key] = val
+    return conditions
 
 
 def main(args):
@@ -182,6 +203,15 @@ def main(args):
     model_path = Path(args.model_path)
     model, _, cfg = load_model(
         model_path, load_data=False)
+
+    if args.guide_factor is not None:
+        conditions = parse_conditions(args.conditions)
+        for k, v in conditions.items():
+            scaler_index = cfg.data.properties.index(k)
+            conditions[k] = model.scalers[scaler_index].transform(v)
+    else:
+        conditions = {}
+
     if torch.cuda.is_available():
         model.to('cuda')
 
@@ -200,13 +230,18 @@ def main(args):
 
         print(f'Sampling {formula} times {num_evals}...')
 
-        test_set = SampleDataset(formula, num_evals)
+        test_set = SampleDataset(formula, num_evals, conditions=conditions)
         test_loader = DataLoader(test_set, batch_size = min(args.batch_size, num_evals))
 
         start_time = time.time()
         (frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list) = diffusion(
-            test_loader, model, args.step_lr, return_traj=args.traj,
+            test_loader, model, return_traj=args.traj,
+            step_lr=args.step_lr, N=args.ode_int_steps,
+            anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
+            guide_factor=args.guide_factor,
         )
+        stop_time = time.time()
+        print("Model time:", stop_time - start_time)
 
         crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
         crystal_traj_list = [
@@ -243,16 +278,29 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
-    formula_group = parser.add_mutually_exclusive_group(required=True)
-    formula_group.add_argument('-f', '--formula', nargs='+', help="Formula string, multiple values are acceptable.")
-    formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula` and `num_evals`(optional), split by WHITESPACE characters.")  # fmt: skip
     parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
     parser.add_argument('--traj', action="store_true", help="Save trajectory.")
     parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
     parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split sampling times of each formula.")
-    parser.add_argument('--step_lr', default=1e-5, type=float, help="step_lr for SDE/ODE.")
+
+    step_group = parser.add_argument_group('integrate step')
+    step_group.add_argument('--step_lr', default=1e-5, type=float, help="step_lr for SDE/ODE (default 1e-5)")
+    step_group.add_argument('-N', '--ode-int-steps', metavar='N', default=None, type=int, help="ODE integrate steps number; overwrite step_lr")
+
+    formula_group = parser.add_argument_group('formula')
+    formula_group = formula_group.add_mutually_exclusive_group(required=True)
+    formula_group.add_argument('-f', '--formula', nargs='+', help="Formula string, multiple values are acceptable.")
+    formula_group.add_argument('-F', '--formula_file', help="Formula tabular file with HEADER `formula` and `num_evals`(optional), split by WHITESPACE characters.")  # fmt: skip
+
+    anneal_group = parser.add_argument_group('annealing')
+    anneal_group.add_argument('--anneal_lattice', action="store_true", help="Anneal lattice.")
+    anneal_group.add_argument('--anneal_coords', action="store_true", help="Anneal coords.")
+    # anneal_group.add_argument('--anneal_type', action="store_true", help="Anneal type.")
+    anneal_group.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
+    anneal_group.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
+
+    guidance_group = parser.add_argument_group('guidance')
+    guidance_group.add_argument('--guide-factor', type=float, help='guidance factor')
 
     args = parser.parse_args()
-
-
     main(args)
