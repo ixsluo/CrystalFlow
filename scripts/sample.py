@@ -167,11 +167,13 @@ def load_formula_tabular_file(formula_file):
             header = 0
     formula_tabular = pd.read_csv(formula_file, sep=r'\s+', header=header)
     if header is None:
+        columns = list(formula_tabular.columns)
         print("Assume first column as formulas")
-        formula_tabular.columns.values[0] = "formula"
+        columns[0] = "formula"
         if len(formula_tabular.columns) > 1:
             print("Assume second column as num_evals")
-            formula_tabular.columns.values[1] = "num_evals"
+            columns[1] = "num_evals"
+        formula_tabular.columns = columns
     num_row = len(formula_tabular)
     formula_tabular = formula_tabular.drop_duplicates("formula")
     if len(formula_tabular) < num_row:
