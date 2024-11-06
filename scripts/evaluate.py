@@ -1,3 +1,5 @@
+# evaluate for CSP
+
 import time
 import argparse
 import torch
@@ -103,7 +105,7 @@ def main(args):
         'lengths': lengths,
         'angles': angles,
         'time': time.time() - start_time,
-    }, model_path / diff_out_name)    
+    }, model_path / diff_out_name)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)

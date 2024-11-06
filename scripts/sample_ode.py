@@ -309,6 +309,7 @@ def main(args):
 
 
 if __name__ == '__main__':
+    raise NotImplementedError("DO NOT USE THIS. Use `sample.py` instead.")
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
     formula_group = parser.add_mutually_exclusive_group(required=True)
