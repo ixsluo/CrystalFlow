@@ -33,7 +33,7 @@ def main(args):
     for pt in args.pt:
         print(f"Extracting {pt}")
         crys_array_list, _ = get_crystal_array_list(pt, batch_idx=-2)
-        gen_crys = p_map(lambda x: Crystal(x), crys_array_list, num_cpus=args.njobs)
+        gen_crys = p_map(lambda x: Crystal(x, compute_fp=False), crys_array_list, num_cpus=args.njobs)
 
         strcuture_list = [c.structure if c.constructed else None for c in gen_crys]
 
