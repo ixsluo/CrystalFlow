@@ -420,6 +420,8 @@ class CSPFlow(BaseModule):
 
         if self.guide_threshold is None and guide_factor is not None:
             raise ValueError("Model is not trained with guidance but trying to sample with guidance.")
+        if self.guide_threshold is not None and guide_factor is None:
+            raise ValueError("Model is trained with guidance but trying to sample with no guidance.")
 
         if guide_factor is not None:
             if self.cond_emb is None:
@@ -505,26 +507,32 @@ class CSPFlow(BaseModule):
                 lattices_mat_t = lattices_mat_T
 
             # ========= pred each step start =========
-            pred = self.decoder(
-                t=time_emb,
-                atom_types=t_t,
-                frac_coords=f_t,
-                lattices_rep=l_t,
-                num_atoms=batch.num_atoms,
-                node2graph=batch.batch,
-                lattices_mat=lattices_mat_t,
-                cemb=None, guide_indicator=None,
-            )
-            pred = self.post_decoder_on_sample(
-                pred,
-                batch=batch, t=t_stamp,
-                anneal_lattice=anneal_lattice, anneal_coords=anneal_coords, anneal_type=anneal_type,
-                anneal_slope=anneal_slope, anneal_offset=anneal_offset,
-            )
-            if self.pred_type:
-                pred_l, pred_f, pred_t = pred
+            if (guide_factor is not None) and (abs(guide_factor - 1) < 1e-4):  # no need to compute
+                pred_l = 0.0
+                pred_f = 0.0
+                if self.pred_type:
+                    pred_t = 0.0
             else:
-                pred_l, pred_f = pred
+                pred = self.decoder(
+                    t=time_emb,
+                    atom_types=t_t,
+                    frac_coords=f_t,
+                    lattices_rep=l_t,
+                    num_atoms=batch.num_atoms,
+                    node2graph=batch.batch,
+                    lattices_mat=lattices_mat_t,
+                    cemb=None, guide_indicator=None,
+                )
+                pred = self.post_decoder_on_sample(
+                    pred,
+                    batch=batch, t=t_stamp,
+                    anneal_lattice=anneal_lattice, anneal_coords=anneal_coords, anneal_type=anneal_type,
+                    anneal_slope=anneal_slope, anneal_offset=anneal_offset,
+                )
+                if self.pred_type:
+                    pred_l, pred_f, pred_t = pred
+                else:
+                    pred_l, pred_f = pred
 
             if guide_factor is not None:
                 pred = self.decoder(
