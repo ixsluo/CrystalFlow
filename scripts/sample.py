@@ -17,7 +17,7 @@ from pymatgen.io.cif import CifWriter
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pyxtal.symmetry import Group
 from torch.optim import Adam
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset
 from torch_geometric.data import Batch, Data
 from torch_geometric.loader import DataLoader
 from tqdm import tqdm
@@ -174,10 +174,6 @@ def load_formula_tabular_file(formula_file):
             print("Assume second column as num_evals")
             columns[1] = "num_evals"
         formula_tabular.columns = columns
-    num_row = len(formula_tabular)
-    formula_tabular = formula_tabular.drop_duplicates("formula")
-    if len(formula_tabular) < num_row:
-        print("Only the first row of duplicated formula is preserved to avoid overwriting.")
 
     formula_list = formula_tabular["formula"].tolist()
     if "num_evals" in formula_tabular.columns:
@@ -200,11 +196,22 @@ def parse_conditions(cond_string: str) -> dict:
     return conditions
 
 
+def parse_conditions(cond_string: str) -> dict:
+    conditions = {}
+    for cond in cond_string.split(';'):
+        key, val = cond.split('=', 1)
+        if ',' in val:
+            raise ValueError("vector condition is not supported yet")
+        else:
+            val = float(val)
+        conditions[key] = val
+    return conditions
+
+
 def main(args):
     print("Loading model...")
     model_path = Path(args.model_path)
-    model, _, cfg = load_model(
-        model_path, load_data=False)
+    model, _, cfg = load_model(model_path, load_data=False)
 
     if args.guide_factor is not None:
         conditions = parse_conditions(args.conditions)
@@ -226,55 +233,61 @@ def main(args):
         formula_list = args.formula
         num_evals_list = [args.num_evals]
 
-    for formula, num_evals in zip(formula_list, num_evals_list):
-        tar_dir = os.path.join(args.save_path, formula)
-        os.makedirs(tar_dir, exist_ok=True)
+    test_set = ConcatDataset(
+        SampleDataset(formula, num_evals, conditions=conditions)
+        for formula, num_evals in zip(formula_list, num_evals_list)
+    )
+    test_loader = DataLoader(test_set, batch_size=args.batch_size)
 
-        print(f'Sampling {formula} times {num_evals}...')
+    start_time = time.time()
+    (frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list) = diffusion(
+        test_loader, model, return_traj=args.traj,
+        step_lr=args.step_lr, N=args.ode_int_steps,
+        anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
+        guide_factor=args.guide_factor,
+    )
+    stop_time = time.time()
+    print("Model time:", stop_time - start_time)
 
-        test_set = SampleDataset(formula, num_evals, conditions=conditions)
-        test_loader = DataLoader(test_set, batch_size = min(args.batch_size, num_evals))
+    crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+    crystal_traj_list = [
+        get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+        for frac_coords, lengths, angles in zip(traj_list[0], traj_list[1], traj_list[2])
+    ]
+    print("Translating sample endpoint...")
+    strcuture_list = p_map(get_pymatgen, crystal_list)
+    print("Translating trajectory...")
+    structure_traj_list = [
+        p_map(get_pymatgen, crystal_list, desc=f"{itraj=}", ncols=79)
+        for itraj, crystal_list in enumerate(crystal_traj_list)
+    ]
+    traj_list = [get_trajectory(t) for t in zip(*structure_traj_list)]
+    if not args.traj:
+        print("Trajectory not saved.")
 
-        start_time = time.time()
-        (frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list) = diffusion(
-            test_loader, model, return_traj=args.traj,
-            step_lr=args.step_lr, N=args.ode_int_steps,
-            anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
-            guide_factor=args.guide_factor,
-        )
-        stop_time = time.time()
-        print("Model time:", stop_time - start_time)
-
-        crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
-        crystal_traj_list = [
-            get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
-            for frac_coords, lengths, angles in zip(traj_list[0], traj_list[1], traj_list[2])
-        ]
-
-        print("Translating sample endpoint...")
-        strcuture_list = p_map(get_pymatgen, crystal_list)
-        print("Translating trajectory...")
-        structure_traj_list = [
-            p_map(get_pymatgen, crystal_list, desc=f"{itraj=}", ncols=79)
-            for itraj, crystal_list in enumerate(crystal_traj_list)
-        ]
-        traj_list = [get_trajectory(t) for t in zip(*structure_traj_list)]
-        if not args.traj:
-            print("Trajectory not saved.")
-
-        for i,structure in enumerate(strcuture_list):
-            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.cif")
-            if structure is not None:
-                writer = CifWriter(structure)
-                writer.write_file(tar_file)
-            else:
-                print(f"{i+1} Error Structure.")
-        for i, traj in enumerate(traj_list):
-            tar_file = os.path.join(tar_dir, f"{formula}_{i+1}.XDATCAR")
-            if traj is not None:
-                traj.write_Xdatcar(tar_file, system=formula)
-            else:
-                print(f"{i+1} Error Trajectory.")
+    tar_dir = os.path.join(args.save_path, "cif")
+    os.makedirs(tar_dir, exist_ok=True)
+    for i, structure in enumerate(strcuture_list):
+        tar_file = os.path.join(tar_dir, f"{i}.cif")
+        if structure is not None:
+            writer = CifWriter(structure)
+            writer.write_file(tar_file)
+        else:
+            print(f"{i} is Error Structure. Skipped.")
+    for i, traj in enumerate(traj_list):
+        tar_file = os.path.join(tar_dir, f"{i}.XDATCAR")
+        if traj is not None:
+            traj.write_Xdatcar(tar_file)
+        else:
+            print(f"{i} is Error Trajectory. Skipped.")
+    tar_dir = os.path.join(args.save_path, "vasp")
+    os.makedirs(tar_dir, exist_ok=True)
+    for i, structure in enumerate(strcuture_list):
+        tar_file = os.path.join(tar_dir, f"{i}.vasp")
+        if structure is not None:
+            structure.to_file(tar_file, fmt="poscar")
+        else:
+            print(f"{i} is Error Structure. Skipped.")
 
 
 if __name__ == '__main__':
@@ -282,7 +295,7 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model_path', required=True, help="Directory of model, '`pwd`' for example.")
     parser.add_argument('-d', '--save_path', required=True, help="Directory to save results, subdir named by formula.")
     parser.add_argument('--traj', action="store_true", help="Save trajectory.")
-    parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula.")
+    parser.add_argument('-n', '--num_evals', default=1, type=int, help="Sampling times of each formula. Overwrited by `num_evals` in formula_file.")
     parser.add_argument('-B', '--batch_size', default=500, type=int, help="How to split sampling times of each formula.")
 
     step_group = parser.add_argument_group('integrate step')
@@ -303,6 +316,7 @@ if __name__ == '__main__':
 
     guidance_group = parser.add_argument_group('guidance')
     guidance_group.add_argument('--guide-factor', type=float, help='guidance factor')
+    guidance_group.add_argument('--conditions', help='conditions string as "a=b;c=d,e", conditions are splited by ";", values are treated by float or float vector')
 
     args = parser.parse_args()
     main(args)
