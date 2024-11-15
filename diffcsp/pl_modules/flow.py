@@ -197,7 +197,8 @@ class CSPFlow(BaseModule):
             if self.cond_emb is None:
                 raise Exception("Model is not initialized with guidance")
             cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
-            guide_indicator = (torch.rand(batch_size, device=self.device) - guide_threshold).heaviside(torch.tensor(1.0))
+            guide_indicator = torch.rand(batch_size, device=self.device) - guide_threshold
+            guide_indicator = guide_indicator.heaviside(torch.tensor(1.0, device=self.device))
 
         # Build time stamp T and 0
         # lattice
