@@ -214,7 +214,7 @@ class CSPNet(nn.Module):
             else:
                 self.node_embedding = nn.Embedding(MAX_ATOMIC_NUM, hidden_dim)
         else:
-            self.node_embedding = nn.Linear(self.type_encoding.out_dim, hidden_dim),
+            self.node_embedding = nn.Linear(self.type_encoding.out_dim, hidden_dim)
         self.atom_latent_emb = nn.Linear(hidden_dim + latent_dim, hidden_dim)
         if act_fn == 'silu':
             self.act_fn = nn.SiLU()
