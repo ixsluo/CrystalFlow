@@ -192,5 +192,5 @@ class TypeTableModule(nn.Module):
         return atom_types
 
     def get_rd_encoded_types(self, num_nodes: int, device=None):
-        encoded_types = torch.randn((num_nodes, self.out_dim), device=device) * 0.1 + 0.5
+        encoded_types = torch.randn((num_nodes, self.out_dim), device=device) + 0.5
         return encoded_types
