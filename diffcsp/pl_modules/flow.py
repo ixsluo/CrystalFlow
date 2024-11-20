@@ -46,6 +46,7 @@ from diffcsp.pl_modules.ode_solvers import str_to_solver
 from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
 from diffcsp.pl_modules.conditioning import MultiEmbedding
 from diffcsp.pl_modules.time_scheduler import TimeScheduler
+from diffcsp.pl_modules.type_module import TypeTableModule
 
 MAX_ATOMIC_NUM = 100
 
@@ -113,8 +114,12 @@ class CSPFlow(BaseModule):
             self.cond_emb = None
             cemb_dim = 1
         self.pred_type = self.hparams.decoder.get('pred_type', False)
+        self.type_encoding = self.hparams.get('type_encoding', None)
+        if self.type_encoding == "table":
+            self.type_encoding = TypeTableModule()
         self.decoder = hydra.utils.instantiate(
             self.hparams.decoder,
+            type_encoding=self.type_encoding,
             latent_dim=self.hparams.latent_dim + self.time_dim,  # 0 + time
             cemb_dim=cemb_dim,
             _recursive_=False,
@@ -197,7 +202,8 @@ class CSPFlow(BaseModule):
             if self.cond_emb is None:
                 raise Exception("Model is not initialized with guidance")
             cemb = self.cond_emb(**{key: batch.get(key) for key in self.cond_emb.cond_keys})
-            guide_indicator = (torch.rand(batch_size, device=self.device) - guide_threshold).heaviside(torch.tensor(1.0))
+            guide_indicator = torch.rand(batch_size, device=self.device) - guide_threshold
+            guide_indicator = guide_indicator.heaviside(torch.tensor(1.0, device=self.device))
 
         # Build time stamp T and 0
         # lattice
@@ -242,8 +248,12 @@ class CSPFlow(BaseModule):
 
         # types
         if self.pred_type:
-            gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
-            rd_atom_types_onehot = torch.randn_like(gt_atom_types_onehot)
+            if self.type_encoding is None:
+                gt_atom_types_onehot = F.one_hot(batch.atom_types - 1, num_classes=MAX_ATOMIC_NUM).float()
+                rd_atom_types_onehot = torch.randn_like(gt_atom_types_onehot)
+            else:
+                gt_atom_types_onehot = self.type_encoding(batch.atom_types)
+                rd_atom_types_onehot = self.type_encoding.get_rd_encoded_types(batch.num_nodes, device=self.device)
 
         # optimal transport
         if self.ot:
@@ -461,8 +471,12 @@ class CSPFlow(BaseModule):
             ) + batch.ops[:, :3, 3]
         # types
         if self.pred_type:
-            rd_atom_types_onehot = torch.randn((batch.num_nodes, MAX_ATOMIC_NUM), device=self.device)
-            atom_types = torch.argmax(rd_atom_types_onehot, dim=-1) + 1
+            if self.type_encoding is None:
+                rd_atom_types_onehot = torch.randn((batch.num_nodes, MAX_ATOMIC_NUM), device=self.device)
+                atom_types = torch.argmax(rd_atom_types_onehot, dim=-1) + 1
+            else:
+                rd_atom_types_onehot = self.type_encoding.get_rd_encoded_types(batch.num_nodes, device=self.device)
+                atom_types = self.type_encoding.decode_types(rd_atom_types_onehot)
         else:
             atom_types = batch.atom_types
 
@@ -575,7 +589,10 @@ class CSPFlow(BaseModule):
                 lattices_mat_t = l_t
 
             if self.pred_type:
-                atom_types = torch.argmax(t_t, dim=-1) + 1
+                if self.type_encoding is None:
+                    atom_types = torch.argmax(t_t, dim=-1) + 1
+                else:
+                    atom_types = self.type_encoding.decode_types(t_t)
 
             traj[t] = {
                 'num_atoms': batch.num_atoms,

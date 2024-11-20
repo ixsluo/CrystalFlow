@@ -201,15 +201,20 @@ class CSPNet(nn.Module):
         smooth=False,
         pred_type=False,
         pred_scalar=False,
+        type_encoding=None | nn.Module,
     ):
         super(CSPNet, self).__init__()
 
         self.ip = ip
         self.smooth = smooth
-        if self.smooth:
-            self.node_embedding = nn.Linear(MAX_ATOMIC_NUM, hidden_dim)
+        self.type_encoding = type_encoding
+        if self.type_encoding is None:
+            if self.smooth:
+                self.node_embedding = nn.Linear(MAX_ATOMIC_NUM, hidden_dim)
+            else:
+                self.node_embedding = nn.Embedding(MAX_ATOMIC_NUM, hidden_dim)
         else:
-            self.node_embedding = nn.Embedding(MAX_ATOMIC_NUM, hidden_dim)
+            self.node_embedding = nn.Linear(self.type_encoding.out_dim, hidden_dim)
         self.atom_latent_emb = nn.Linear(hidden_dim + latent_dim, hidden_dim)
         if act_fn == 'silu':
             self.act_fn = nn.SiLU()
@@ -270,7 +275,8 @@ class CSPNet(nn.Module):
         if self.ln:
             self.final_layer_norm = nn.LayerNorm(hidden_dim)
         if self.pred_type:
-            self.type_out = nn.Linear(hidden_dim, MAX_ATOMIC_NUM)
+            type_out_dim = MAX_ATOMIC_NUM if self.type_encoding is None else self.type_encoding.out_dim
+            self.type_out = nn.Linear(hidden_dim, type_out_dim)
         self.pred_scalar = pred_scalar
         if self.pred_scalar:
             self.scalar_out = nn.Linear(hidden_dim, 1)
