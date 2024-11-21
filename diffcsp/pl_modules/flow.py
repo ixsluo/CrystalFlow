@@ -797,7 +797,7 @@ class CSPFlow(BaseModule):
         else:
             raise NotImplementedError("stepping class except fixed is not accepted.")
 
-    def training_step(self, batch, batch_idx: int):
+    def training_step(self, batch, batch_idx: int, dataloader_idx=0):
 
         output_dict = self(batch)
 
@@ -823,7 +823,7 @@ class CSPFlow(BaseModule):
 
         return loss
 
-    def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: Any, batch_idx: int, dataloader_idx=0) -> torch.Tensor:
 
         output_dict = self(batch)
 
@@ -838,7 +838,7 @@ class CSPFlow(BaseModule):
         )
         return loss
 
-    def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
+    def test_step(self, batch: Any, batch_idx: int, dataloader_idx=0) -> torch.Tensor:
 
         output_dict = self(batch)
 
