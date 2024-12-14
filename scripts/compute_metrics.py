@@ -484,6 +484,8 @@ def main(args):
         else:
             pred_crys = []
             for i in range(len(crys_array_list)):
+                if args.multi_idx is not None and i != args.multi_idx:
+                    continue
                 print(f"Processing batch {i}")
                 pred_crys.append(p_map(lambda x: Crystal(x), crys_array_list[i], num_cpus=args.njobs))
 
@@ -507,6 +509,8 @@ def main(args):
         metrics_out_file = 'eval_metrics.json'
     else:
         metrics_out_file = f'eval_metrics_{args.label}.json'
+    if args.multi_idx is not None:
+        metrics_out_file = str(Path(metrics_out_file).stem + f"_{args.multi_idx}.json")
     metrics_out_file = os.path.join(args.root_path, metrics_out_file)
 
     # only overwrite metrics computed in the new run.
@@ -533,6 +537,7 @@ if __name__ == '__main__':
     parser.add_argument('--tasks', nargs='+', default=['csp'])
     parser.add_argument('--gt_file',default='')
     parser.add_argument('--multi_eval',action='store_true')
+    parser.add_argument('--multi_idx', type=int, default=None, help="index for multi_eval (special case)")
     parser.add_argument('-j', '--njobs', default=32, type=int)
     args = parser.parse_args()
     main(args)
