@@ -30,31 +30,39 @@ def get_pymatgen(crystal_array):
 
 
 def main(args):
+    if args.task == "gen":
+        mode = -2
+    elif args.task == "eval":
+        mode = -1
+    else:
+        mode = -2
     for pt in args.pt:
         print(f"Extracting {pt}")
-        crys_array_list, _ = get_crystal_array_list(pt, batch_idx=-2)
-        gen_crys = p_map(lambda x: Crystal(x, compute_fp=False), crys_array_list, num_cpus=args.njobs)
+        crys_array_list, _ = get_crystal_array_list(pt, batch_idx=mode)
+        for eval_idx, i_crys_array_list in enumerate(crys_array_list):
+            gen_crys = p_map(lambda x: Crystal(x, compute_fp=False), i_crys_array_list, num_cpus=args.njobs)
 
-        strcuture_list = [c.structure if c.constructed else None for c in gen_crys]
+            strcuture_list = [c.structure if c.constructed else None for c in gen_crys]
 
-        extract_dir = Path(pt).with_suffix(".dir")
-        extract_dir.mkdir(exist_ok=True)
-        extract_cif_dir = extract_dir / "cif"
-        extract_cif_dir.mkdir(exist_ok=True)
-        extract_vasp_dir = extract_dir / "vasp"
-        extract_vasp_dir.mkdir(exist_ok=True)
-        for i, structure in enumerate(strcuture_list):
-            if structure is not None:
-                CifWriter(structure).write_file(extract_cif_dir / f"{i}.cif")
-                Poscar(structure).write_file(extract_vasp_dir / f"{i}.vasp")
-            else:
-                print(f"Error Structure index: {i}.")
+            extract_dir = Path(pt).with_suffix(".dir").joinpath(f"{eval_idx}")
+            extract_dir.mkdir(exist_ok=True, parents=True)
+            extract_cif_dir = extract_dir / "cif"
+            extract_cif_dir.mkdir(exist_ok=True)
+            extract_vasp_dir = extract_dir / "vasp"
+            extract_vasp_dir.mkdir(exist_ok=True)
+            for i, structure in enumerate(strcuture_list):
+                if structure is not None:
+                    CifWriter(structure).write_file(extract_cif_dir / f"{i}.cif")
+                    Poscar(structure).write_file(extract_vasp_dir / f"{i}.vasp")
+                else:
+                    print(f"Error Structure index: {i}.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("pt", nargs="+", help="Evaluate torch pt files list")
     parser.add_argument('-j', '--njobs', default=32, type=int)
+    parser.add_argument('--task', choices=["gen", "eval"], default="gen")
 
     args = parser.parse_args()
     main(args)
