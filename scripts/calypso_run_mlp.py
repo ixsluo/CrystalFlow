@@ -247,7 +247,8 @@ def run_opt(
 
         data = {}
         cif = Path(cif)
-        atoms = read(cif, format="cif")
+        # atoms = read(cif, format="cif")
+        atoms = read(cif)
 
         dis_mtx = atoms.get_all_distances(mic=True)
         row, col = np.diag_indices_from(dis_mtx)
