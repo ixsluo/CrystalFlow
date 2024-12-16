@@ -40,6 +40,8 @@ export    WANDB_DIR="/home/<YOURHOME>/CrystalFlow/log"
 
 ### Training
 
+Pretrained checkpoints are provided in [Releases](https://github.com/ixsluo/CrystalFlow/releases).
+
 #### For CSP task on MP-20 dataset without conditioning
 
 ```bash
