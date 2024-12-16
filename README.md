@@ -1,12 +1,8 @@
-# Crystal Structure Prediction by Joint Equivariant Diffusion (NeurIPS 2023)
+# CrystalFlow: A Flow-Based Generative Model for Crystalline Materials
 
-Implementation codes for Crystal Structure Prediction by Joint Equivariant Diffusion (DiffCSP). 
+Implementation codes for CrystalFlow: A Flow-Based Generative Model for Crystalline Materials.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/jiaor17/DiffCSP/blob/main/LICENSE)   [**[Paper]**](https://arxiv.org/abs/2309.04475)
-
-![Overview](fig/overview.png "Overview")
-
-![Demo](fig/demo.gif "Demo")
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ixsluo/CrystalFlow/blob/main/LICENSE)   [**[Paper]**]()
 
 ### Dependencies and Setup
 
@@ -14,8 +10,8 @@ Note: updated `python==3.11` and `pytorch>=2.0.0` and `hydra>=1.3`
 
 ```bash
 # sudo apt-get install gfortran libfftw3-dev pkg-config
-conda create -n diffcsp python=3.11.9
-conda activate diffcsp
+conda create -n crystalflow python=3.11.9
+conda activate crystalflow
 pip install torch==2.3.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install torch_geometric==2.5.3
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.3.0+cu121.html
@@ -37,68 +33,119 @@ WANDB_DIR: the absolute path to save wabdb outputs
 example:
 ```bash
 # vi .env
-export PROJECT_ROOT="/home/<YOURHOME>/DiffCSP"
-export   HYDRA_JOBS="/home/<YOURHOME>/DiffCSP/hydra"
-export    WANDB_DIR="/home/<YOURHOME>/DiffCSP/log"
+export PROJECT_ROOT="/home/<YOURHOME>/CrystalFlow"
+export   HYDRA_JOBS="/home/<YOURHOME>/CrystalFlow/hydra"
+export    WANDB_DIR="/home/<YOURHOME>/CrystalFlow/log"
 ```
 
 ### Training
 
-#### DiffCSP
-
-For the CSP task
+#### For CSP task on MP-20 dataset without conditioning
 
 ```bash
-python diffcsp/run.py data=<dataset> expname=<expname>
-
-# example:
-# python diffcsp/run.py data=mp_20 logging.wandb.group=mp_20 expname=origin
+CUDA_VISIBLE_DEVICES=1 HYDRA_FULL_ERROR=1 nohup python diffcsp/run.py \
+data=mp_20 data.train_max_epochs=3000 \
+model=flow_polar \
+optim.optimizer.lr=1e-3 \
+optim.optimizer.weight_decay=0 \
+optim.lr_scheduler.factor=0.6 \
++model.lattice_polar_sigma=0.1 \
+model.cost_coord=10 model.cost_lattice=1 \
+model.decoder.num_freqs=256 \
+model.decoder.rec_emb=sin model.decoder.num_millers=8 \
++model.decoder.na_emb=0 \
+model.decoder.hidden_dim=512 model.decoder.num_layers=6 \
+logging.wandb.mode=online \
+logging.wandb.project=crystalflow-gridtest \
+expname=CSP-mp20 \
+      > CSP-mp20.log 2>&1 &
 ```
 
-For the Ab Initio Generation task
+#### For CSP task on MP-CALYPSO-60 dataset with pressure conditioning
 
 ```bash
-python diffcsp/run.py data=<dataset> model=diffusion_w_type expname=<expname>
+CUDA_VISIBLE_DEVICES='0,1,2,3' HYDRA_FULL_ERROR=1 nohup python diffcsp/run.py \
+data=calypso_60 data.train_max_epochs=2000 \
+data.datamodule.batch_size.train=64 \
+optim.optimizer.lr=1e-3 \
+optim.optimizer.weight_decay=0 \
+optim.lr_scheduler.factor=0.6 \
+model=flow_polar \
++model.guide_threshold=-1 \
++model.from_cubic=false \
++model.lattice_polar_sigma=0.1 \
+model.cost_coord=10 model.cost_lattice=1 \
+model.decoder.num_freqs=256 \
+model.decoder.rec_emb=sin model.decoder.num_millers=8 \
++model.decoder.na_emb=0 \
+model.decoder.hidden_dim=512 model.decoder.num_layers=6 \
+train.pl_trainer.devices=4 \
++train.pl_trainer.strategy=ddp_find_unused_parameters_true \
+logging.wandb.mode=online \
+logging.wandb.project=crystalflow-gridtest \
+expname=CSP-mpcalypso60-pressure \
+      > CSP-mpcalypso60-pressure.log 2>&1 &
 ```
 
-The ``<dataset>`` tag can be selected from perov_5, mp_20, mpts_52 and carbon_24, and the ``<expname>`` tag can be an arbitrary name to identify each experiment. Pre-trained checkpoints are provided [here](https://drive.google.com/drive/folders/11WOc9lTZN4hkIY7SKLCIrbsTMGy9TsoW?usp=sharing).
+#### For DNG task on MP-20 without conditioning
 
-#### Flow model
-
-optional command line parameters
-
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 HYDRA_FULL_ERROR=1 nohup python diffcsp/run.py \
+train.pl_trainer.devices=4 \
++train.pl_trainer.strategy=ddp_find_unused_parameters_true \
+data=mp_20 data.train_max_epochs=3000 \
+model=flow_polar_w_type \
++model.type_encoding=table \
+optim.optimizer.lr=1e-3 \
+optim.optimizer.weight_decay=0 \
+optim.lr_scheduler.factor=0.6 \
++model.lattice_polar_sigma=0.1 \
+model.cost_type=10 model.cost_coord=10 model.cost_lattice=1 \
+model.decoder.num_freqs=256 \
+model.decoder.rec_emb=sin model.decoder.num_millers=8 \
++model.decoder.na_emb=0 \
+model.decoder.hidden_dim=512 model.decoder.num_layers=6 \
+logging.wandb.mode=online \
+logging.wandb.project=crystalflow-gridtest \
+expname=DNG-mp20 \
+      > DNG-mp20.log 2>&1 &
 ```
-model=[flow|flow_polar]  # use direct lattice or polar-decomposition lattice
-+model.from_cubic=true  # sample lattice from cubic prior, only effect on flow_polar
-+lattice_polar_sigma=1  # lattice polar prior sigma
-model.decoder.rec_emb=sin model.decoder.num_millers=6  # use reciprocal representation
-model.time_dim=0  # if 0, use no embedding, else sinusoidal embedding
-+model.lattice_teacher_forcing=-1  # epoch of teacher-forcing on lattice
-model.cost_coord=10 model.cost_lattice=0.1  # fix coords or lattice if less than 1e-5
-+model.ot=true  # use optimal transport, default false
-```
 
-example for ab-init model training
+#### For DNG task on MP-20 with formation energy conditioning
 
-```
-model=flow_polar_w_type  # w_type
-model.cost_type=100 model.cost_coord=100 model.cost_lattice=1
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 HYDRA_FULL_ERROR=1 nohup python diffcsp/run.py \
+train.pl_trainer.devices=4 \
++train.pl_trainer.strategy=ddp_find_unused_parameters_true \
+data=mp_20_chgnet data.train_max_epochs=3000 \
+model=flow_polar_w_type \
++model.type_encoding=table \
++model.guide_threshold=-1 \
+optim.optimizer.lr=1e-3 \
+optim.optimizer.weight_decay=0 \
+optim.lr_scheduler.factor=0.6 \
++model.lattice_polar_sigma=0.1 \
+model.cost_type=10 model.cost_coord=10 model.cost_lattice=1 \
+model.decoder.num_freqs=256 \
+model.decoder.rec_emb=sin model.decoder.num_millers=8 \
++model.decoder.na_emb=0 \
+model.decoder.hidden_dim=512 model.decoder.num_layers=6 \
+logging.wandb.mode=online \
+logging.wandb.project=crystalflow-gridtest \
+expname=DNG-mp20-Eform \
+      > DNG-mp20-Eform.log 2>&1 &
 ```
 
 
 ### Evaluation
 
-#### Stable structure prediction 
+#### CSP generation
 
 One sample
 
 ```bash
 python scripts/evaluate.py --model_path <model_path> --dataset <dataset>
-python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv 
-
-# example:
-# python ~/DiffCSP/scripts/evaluate.py --model_path `pwd` --dataset mp_20
-# python ~/DiffCSP/scripts/compute_metrics.py --root_path `pwd` --tasks csp --gt_file ~/DiffCSP/data/mp_20/test.csv
+python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv
 ```
 
 Multiple samples
@@ -108,7 +155,7 @@ python scripts/evaluate.py --model_path <model_path> --dataset <dataset> --num_e
 python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --multi_eval
 ```
 
-#### Ab initio generation
+#### DNG generation
 
 ```bash
 python scripts/generation.py --model_path <model_path> --dataset <dataset>
@@ -122,71 +169,18 @@ python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file
 python scripts/sample.py --model_path <model_path> --save_path <save_path> --formula <formula> --num_evals <num_evals>
 ```
 
-#### Property Optimization
-
-```
-# train a time-dependent energy prediction model 
-python diffcsp/run.py data=<dataset> model=energy expname=<expname> data.datamodule.batch_size.test=100
-
-# Optimization
-python scripts/optimization.py --model_path <energy_model_path> --uncond_path <model_path>
-
-# Evaluation
-python scripts/compute_metrics.py --root_path <energy_model_path> --tasks opt
-```
-
-#### Flow model - evaluation with various ODE
-
-```bash
-for solver in euler midpoint rk4; do
-for seq in lf cf; do
-for N in 20 50; do
-  label=N${N}R1S${solver}-${seq}
-  echo $label
-  CUDA_VISIBLE_DEVICES=0 python ~/DiffCSP/scripts/evaluate_ode.py \
-    --model_path `pwd` -N $N --solver $solver -seq $seq \
-    --test_bs 1000 --label $label
-  # legacy metrics
-  python ~/DiffCSP/scripts/compute_metrics.py --root_path `pwd` --label $label
-  # metrics without SMACT
-  # python ~/DiffCSP/scripts/compute_metrics_rec.py --root_path `pwd` --label $label
-done
-done
-done
-```
-
-#### Flow model - sample from arbitrary composition & trajectory
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python ~/DiffCSP/scripts/sample_ode.py -m `pwd` -d sample -h
-```
-
-
-#### Flow model - ab-init generation
-
-```bash
-python scripts/generation.py --model_path <model_path> --dataset <dataset> --step_lr 0.01
-python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv
-```
-
 ### Acknowledgments
 
-The main framework of this codebase is build upon [CDVAE](https://github.com/txie-93/cdvae). For the datasets, Perov-5, Carbon-24 and MP-20 are from [CDVAE](https://github.com/txie-93/cdvae), and MPTS-52 is collected from its original [codebase](https://github.com/sparks-baird/mp-time-split).
+The main framework of this codebase is build upon [DiffCSP](https://github.com/txie-93/cdvae). For the datasets, Perov-5, Carbon-24 and MP-20 are from [CDVAE](https://github.com/txie-93/cdvae), and MPTS-52 is from [DiffCSP](https://github.com/txie-93/cdvae) (originaly from [codebase](https://github.com/sparks-baird/mp-time-split)).
 
 ### Citation
 
 Please consider citing our work if you find it helpful:
 ```
-@article{jiao2023crystal,
-  title={Crystal structure prediction by joint equivariant diffusion},
-  author={Jiao, Rui and Huang, Wenbing and Lin, Peijia and Han, Jiaqi and Chen, Pin and Lu, Yutong and Liu, Yang},
-  journal={arXiv preprint arXiv:2309.04475},
-  year={2023}
-}
 ```
 
 ### Contact
 
 If you have any questions, feel free to reach us at:
 
-Rui Jiao: [jiaor21@mails.tsinghua.edu.cn](mailto:jiaor21@mails.tsinghua.edu.cn)
+Xiaoshan Luo: [luoxs21@mails.jlu.edu.cn](mailto:luoxs21@mails.jlu.edu.cn)
