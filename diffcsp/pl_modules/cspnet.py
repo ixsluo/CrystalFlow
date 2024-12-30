@@ -15,6 +15,7 @@ from diffcsp.common.data_utils import (
     frac_to_cart_coords,
     repeat_blocks,
     get_reciprocal_lattice_torch,
+    get_max_neighbors_mask,
 )
 
 MAX_ATOMIC_NUM = 100
@@ -272,6 +273,7 @@ class CSPNet(nn.Module):
         self.pred_type = pred_type
         self.ln = ln
         self.edge_style = edge_style
+        print(f"edge_style: {edge_style}")
         if self.ln:
             self.final_layer_norm = nn.LayerNorm(hidden_dim)
         if self.pred_type:
@@ -363,7 +365,8 @@ class CSPNet(nn.Module):
             fc_graph = torch.block_diag(*lis)
             fc_edges, _ = dense_to_sparse(fc_graph)
             return fc_edges, (frac_coords[fc_edges[1]] - frac_coords[fc_edges[0]]) % 1.0
-        elif self.edge_style == 'knn':
+
+        elif (self.edge_style == 'knn') or (self.edge_style == "knn_cart"):
             lattice_nodes = lattices[node2graph]
             cart_coords = torch.einsum('bi,bij->bj', frac_coords, lattice_nodes)
 
@@ -387,6 +390,48 @@ class CSPNet(nn.Module):
             )
 
             return edge_index_new, -edge_vector_new
+
+        elif (self.edge_style == "knn_frac"):
+            # Before computing the pairwise distances between atoms, first create a list of atom indices to compare for the entire batch
+            num_atoms_per_image = num_atoms
+            num_atoms_per_image_sqr = (num_atoms_per_image**2).long()
+            # index offset between images
+            index_offset = torch.cumsum(num_atoms_per_image, dim=0) - num_atoms_per_image
+
+            index_offset_expand = torch.repeat_interleave(index_offset, num_atoms_per_image_sqr)
+            num_atoms_per_image_expand = torch.repeat_interleave(num_atoms_per_image, num_atoms_per_image_sqr)
+
+            num_atom_pairs = torch.sum(num_atoms_per_image_sqr)
+            index_sqr_offset = (torch.cumsum(num_atoms_per_image_sqr, dim=0) - num_atoms_per_image_sqr)
+            index_sqr_offset = torch.repeat_interleave(index_sqr_offset, num_atoms_per_image_sqr)
+            atom_count_sqr = (torch.arange(num_atom_pairs, device=num_atoms.device) - index_sqr_offset)
+
+            index1 = torch.div(atom_count_sqr, num_atoms_per_image_expand, rounding_mode="floor") + index_offset_expand
+            index2 = (atom_count_sqr % num_atoms_per_image_expand) + index_offset_expand
+
+            frac_pos1 = torch.index_select(frac_coords, 0, index1)
+            frac_pos2 = torch.index_select(frac_coords, 0, index2)
+            frac_dist_mic_sqr = torch.sum(((frac_pos1 - frac_pos2 - 0.5) % 1 - 0.5) ** 2, dim=1).view(-1)
+
+            mask_num_neighbors, num_bonds = get_max_neighbors_mask(
+                natoms=num_atoms,
+                index=index1,
+                atom_distance=frac_dist_mic_sqr,
+                max_num_neighbors_threshold=self.max_neighbors,
+            )
+            if not torch.all(mask_num_neighbors):
+                # Mask out the atoms to ensure each atom has at most max_num_neighbors_threshold neighbors
+                index1 = torch.masked_select(index1, mask_num_neighbors)
+                index2 = torch.masked_select(index2, mask_num_neighbors)
+
+            edge_index = torch.stack((index2, index1))
+            j_index, i_index = edge_index
+            edge_vector = (frac_coords[j_index] - frac_coords[i_index]) % 1
+
+            return edge_index, edge_vector
+
+        else:
+            raise ValueError(f"Unknown type of edge style: {self.edge_style}")
 
     def forward(self, t, atom_types, frac_coords, lattices_rep, num_atoms, node2graph, lattices_mat=None, cemb=None, guide_indicator=None):
 
