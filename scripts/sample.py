@@ -109,7 +109,7 @@ class SampleDataset(Dataset):
         super().__init__()
         self.formula = formula
         self.num_evals = num_evals
-        self.conditions = conditions
+        self.conditions = {k: torch.tensor(v, dtype=torch.float32) if not isinstance(v, torch.Tensor) else v for k, v in conditions.items()}
         self.get_structure()
 
     def get_structure(self):
@@ -159,13 +159,13 @@ def get_trajectory(structures):
 
 def load_formula_tabular_file(formula_file):
     with open(formula_file, "r") as f:
-        line = f.readline().split()
+        line = f.readline().strip()
         if 'formula' not in line:
             print("First line inferred NOT a HEADER, assume no header line")
             header = None
         else:
             header = 0
-    formula_tabular = pd.read_csv(formula_file, sep=r'\s+', header=header)
+    formula_tabular = pd.read_csv(formula_file, header=header)
     if header is None:
         columns = list(formula_tabular.columns)
         print("Assume first column as formulas")
@@ -181,23 +181,17 @@ def load_formula_tabular_file(formula_file):
     else:
         num_evals_list = None
 
-    return formula_list, num_evals_list
+    # assume any other columns are conditions
+    keys = [k for k in formula_tabular.columns if (k != "formula") and (k != "num_evals")]
+    conditions_list = list(formula_tabular[keys].T.to_dict().values())
+
+    return formula_list, num_evals_list, conditions_list
 
 
-def parse_conditions(cond_string: str) -> dict:
+def parse_conditions(cond_string: str | None) -> dict:
     conditions = {}
-    for cond in cond_string.split(';'):
-        key, val = cond.split('=', 1)
-        if ',' in val:
-            raise ValueError("vector condition is not supported yet")
-        else:
-            val = float(val)
-        conditions[key] = val
-    return conditions
-
-
-def parse_conditions(cond_string: str) -> dict:
-    conditions = {}
+    if cond_string is None:
+        return conditions
     for cond in cond_string.split(';'):
         key, val = cond.split('=', 1)
         if ',' in val:
@@ -213,29 +207,32 @@ def main(args):
     model_path = Path(args.model_path)
     model, _, cfg = load_model(model_path, load_data=False)
 
-    if args.guide_factor is not None:
-        conditions = parse_conditions(args.conditions)
-        for k, v in conditions.items():
-            scaler_index = cfg.data.properties.index(k)
-            conditions[k] = model.scalers[scaler_index].transform(v)
+    if args.formula_file is not None:
+        print(f"Trying reading sampling formula and num_evals from '{args.formula_file}'...")
+        formula_list, num_evals_list, conditions_list = load_formula_tabular_file(args.formula_file)
+        if num_evals_list is None:
+            num_evals_list = [args.num_evals for _ in formula_list]
+        if args.guide_factor is None:
+            conditions_list = [{}] * len(formula_list)
     else:
-        conditions = {}
+        formula_list = args.formula
+        num_evals_list = [args.num_evals]
+        conditions = parse_conditions(args.conditions) if args.guide_factor is not None else {}
+        conditions_list = [conditions] * len(formula_list)
+
+    conditions_df = pd.DataFrame(conditions_list)
+    normed_conditions = {}  # {A: [1, 2]}
+    for k, v in conditions_df.to_dict('list').items():
+        scaler_index = cfg.data.properties.index(k)
+        normed_conditions[k] = model.scalers[scaler_index].transform(v)
+    normed_conditions_list = list(pd.DataFrame(normed_conditions).T.to_dict().values())
 
     if torch.cuda.is_available():
         model.to('cuda')
 
-    if args.formula_file is not None:
-        print(f"Trying reading sampling formula and num_evals from '{args.formula_file}'...")
-        formula_list, num_evals_list = load_formula_tabular_file(args.formula_file)
-        if num_evals_list is None:
-            num_evals_list = [args.num_evals for _ in formula_list]
-    else:
-        formula_list = args.formula
-        num_evals_list = [args.num_evals]
-
     test_set = ConcatDataset(
-        SampleDataset(formula, num_evals, conditions=conditions)
-        for formula, num_evals in zip(formula_list, num_evals_list)
+        SampleDataset(formula, num_evals, conditions=normed_conditions)
+        for formula, num_evals, normed_conditions in zip(formula_list, num_evals_list, normed_conditions_list)
     )
     test_loader = DataLoader(test_set, batch_size=args.batch_size)
 

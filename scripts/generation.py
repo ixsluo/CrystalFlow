@@ -137,7 +137,7 @@ class SampleDataset(Dataset):
         self.distribution = train_dist[dataset]
         self.num_atoms = np.random.choice(len(self.distribution), total_num, p = self.distribution)
         self.is_carbon = dataset == 'carbon_24'
-        self.conditions = conditions
+        self.conditions = {k: torch.tensor(v, dtype=torch.float32) if not isinstance(v, torch.Tensor) else v for k, v in conditions.items()}
 
     def __len__(self) -> int:
         return self.total_num
@@ -157,8 +157,10 @@ class SampleDataset(Dataset):
         return data
 
 
-def parse_conditions(cond_string: str) -> dict:
+def parse_conditions(cond_string: str | None) -> dict:
     conditions = {}
+    if cond_string is None:
+        return conditions
     for cond in cond_string.split(';'):
         key, val = cond.split('=', 1)
         if ',' in val:
