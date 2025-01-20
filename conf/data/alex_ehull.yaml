@@ -8,7 +8,7 @@ conditions:
   - e_above_hull
 niggli: true
 primitive: False
-graph_method: crystalnn
+graph_method: 'none'
 lattice_scale_method: scale_length
 preprocess_workers: 30
 readout: mean
