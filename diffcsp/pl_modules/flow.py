@@ -42,7 +42,7 @@ from diffcsp.common.utils import PROJECT_ROOT
 from diffcsp.pl_modules.diff_utils import d_log_p_wrapped_normal
 from diffcsp.pl_modules.hungarian import HungarianMatcher
 from diffcsp.pl_modules.lattice_utils import LatticeDecompNN
-from diffcsp.pl_modules.ode_solvers import str_to_solver
+# from diffcsp.pl_modules.ode_solvers import str_to_solver
 from diffcsp.pl_modules.symmetrize import SymmetrizeRotavg
 from diffcsp.pl_modules.conditioning import MultiEmbedding
 from diffcsp.pl_modules.time_scheduler import TimeScheduler
@@ -778,24 +778,24 @@ class CSPFlow(BaseModule):
 
         return traj[list(traj)[-1]], traj_stack
 
-    @torch.no_grad()
-    def sample_ode(
-        self, batch, t_span, solver, integrate_sequence="lattice_first",
-        anneal_lattice=False, anneal_coords=False,
-        anneal_slope=0.0, anneal_offset=0.0,
-        **kwargs,
-    ):
-        t_span = t_span.to(self.device)
-        solver = str_to_solver(solver)
-        if solver.stepping_class == "fixed":
-            return self._fixed_odeint(
-                batch, t_span, solver, integrate_sequence,
-                anneal_lattice, anneal_coords,
-                anneal_slope, anneal_offset,
-                **kwargs,
-            )
-        else:
-            raise NotImplementedError("stepping class except fixed is not accepted.")
+    # @torch.no_grad()
+    # def sample_ode(
+    #     self, batch, t_span, solver, integrate_sequence="lattice_first",
+    #     anneal_lattice=False, anneal_coords=False,
+    #     anneal_slope=0.0, anneal_offset=0.0,
+    #     **kwargs,
+    # ):
+    #     t_span = t_span.to(self.device)
+    #     solver = str_to_solver(solver)
+    #     if solver.stepping_class == "fixed":
+    #         return self._fixed_odeint(
+    #             batch, t_span, solver, integrate_sequence,
+    #             anneal_lattice, anneal_coords,
+    #             anneal_slope, anneal_offset,
+    #             **kwargs,
+    #         )
+    #     else:
+    #         raise NotImplementedError("stepping class except fixed is not accepted.")
 
     def training_step(self, batch, batch_idx: int, dataloader_idx=0):
 
