@@ -202,6 +202,11 @@ def parse_conditions(cond_string: str | None) -> dict:
     return conditions
 
 
+def parse_wyckoff():  # Li1x4a_Li1x4b_Li6x4c_Li7x8d
+    pass
+
+
+
 def main(args):
     print("Loading model...")
     model_path = Path(args.model_path)
@@ -217,15 +222,20 @@ def main(args):
     else:
         formula_list = args.formula
         num_evals_list = [args.num_evals]
-        conditions = parse_conditions(args.conditions) if args.guide_factor is not None else {}
-        conditions_list = [conditions] * len(formula_list)
+        conditions_list = [{}] * len(formula_list)
 
-    conditions_df = pd.DataFrame(conditions_list)
-    normed_conditions = {}  # {A: [1, 2]}
-    for k, v in conditions_df.to_dict('list').items():
-        scaler_index = cfg.data.properties.index(k)
-        normed_conditions[k] = model.scalers[scaler_index].transform(v)
-    normed_conditions_list = list(pd.DataFrame(normed_conditions).T.to_dict().values())
+    # update argument conditions
+    arg_conditions = parse_conditions(args.conditions) if args.guide_factor is not None else {}
+    for c in conditions_list:
+        c.update(arg_conditions)
+
+    if conditions_list[0]:  # there exists any condition
+        conditions_df = pd.DataFrame(conditions_list)
+        normed_conditions = {}  # {A: [1, 2]}
+        for k, v in conditions_df.to_dict('list').items():
+            scaler_index = cfg.data.properties.index(k)
+            normed_conditions[k] = model.scalers[scaler_index].transform(v)
+        normed_conditions_list = list(pd.DataFrame(normed_conditions).T.to_dict().values())
 
     if torch.cuda.is_available():
         model.to('cuda')
