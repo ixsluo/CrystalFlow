@@ -423,6 +423,11 @@ class CSPFlow(BaseModule):
         guide_factor=None,
         **kwargs,
     ):
+        """
+        Requires
+            non-symmetry: num_nodes atom_types
+            symmetry: num_nodes atom_types spacegroup anchor_index ops ops_inv (general_ops symm_map num_general_ops)
+        """
         if N is None:
             N = round(1 / step_lr)
 

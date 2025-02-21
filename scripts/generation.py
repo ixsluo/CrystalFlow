@@ -227,8 +227,11 @@ def main(args):
     if args.guide_factor is not None:
         conditions = parse_conditions(args.conditions)
         for k, v in conditions.items():
-            scaler_index = cfg.data.properties.index(k)
-            conditions[k] = model.scalers[scaler_index].transform(v)
+            if k in cfg.data.properties:
+                scaler_index = cfg.data.properties.index(k)
+                conditions[k] = model.scalers[scaler_index].transform(v)
+            else:
+                conditions[k] = v
     else:
         conditions = {}
 

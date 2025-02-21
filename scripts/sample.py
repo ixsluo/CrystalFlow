@@ -2,20 +2,26 @@
 
 import argparse
 import os
+import re
 import time
+from itertools import chain
 from pathlib import Path
+from typing import Any
 
 import chemparse
 import numpy as np
 import pandas as pd
 import torch
 from p_tqdm import p_map
+from pymatgen.core.periodic_table import Element
 from pymatgen.core.lattice import Lattice
 from pymatgen.core.structure import Structure
 from pymatgen.core.trajectory import Trajectory
 from pymatgen.io.cif import CifWriter
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pyxtal.symmetry import Group
+from pyxtal.symmetry import Wyckoff_position as wp
+from torch import Tensor
 from torch.optim import Adam
 from torch.utils.data import Dataset, ConcatDataset
 from torch_geometric.data import Batch, Data
@@ -104,13 +110,31 @@ def diffusion(loader, model, return_traj, **sample_kwargs):
         frac_coords, atom_types, lattices, lengths, angles, num_atoms, traj_list,
     )
 
+
+class SymData(Data):
+    def __inc__(self, key: str, value: Any, *args, **kwargs) -> Any:
+        if 'batch' in key and isinstance(value, Tensor):
+            return int(value.max()) + 1
+        elif 'index' in key or key == 'face':
+            return self.num_nodes
+        elif key == 'symm_map':
+            return self.num_nodes
+        else:
+            return 0
+
+
 class SampleDataset(Dataset):
     def __init__(self, formula, num_evals, conditions: dict):
         super().__init__()
         self.formula = formula
         self.num_evals = num_evals
+        self.wyckoff = conditions.pop('wyckoff', None)
         self.conditions = {k: torch.tensor(v, dtype=torch.float32) if not isinstance(v, torch.Tensor) else v for k, v in conditions.items()}
-        self.get_structure()
+
+        if self.wyckoff is None:
+            self.get_structure()
+        else:
+            self.wyckoff_info: dict = parse_wyckoff(self.wyckoff)
 
     def get_structure(self):
         self.composition = chemparse.parse_formula(self.formula)
@@ -124,15 +148,30 @@ class SampleDataset(Dataset):
         return self.num_evals
 
     def __getitem__(self, index):
-        return Data(
-            atom_types=torch.LongTensor(self.chem_list),
-            num_atoms=len(self.chem_list),
-            num_nodes=len(self.chem_list),
-            **{
-                key: val.view(1, -1)
-                for key, val in self.conditions.items()
-            },
-        )
+        if self.wyckoff is None:
+            return Data(
+                atom_types=torch.LongTensor(self.chem_list),
+                num_atoms=len(self.chem_list),
+                num_nodes=len(self.chem_list),
+                **{
+                    key: val.view(1, -1)
+                    for key, val in self.conditions.items()
+                },
+            )
+        else:
+            return SymData(
+                atom_types=torch.LongTensor(self.wyckoff_info["atom_types"]),
+                num_atoms=self.wyckoff_info['num_atoms'],
+                num_nodes=self.wyckoff_info['num_atoms'],
+                spacegroup=self.wyckoff_info['spacegroup'],
+                ops=torch.Tensor(self.wyckoff_info['ops']),
+                ops_inv=torch.Tensor(self.wyckoff_info['ops_inv']),
+                anchor_index=torch.LongTensor(self.wyckoff_info['anchor_index']),
+                **{
+                    key: val.view(1, -1)
+                    for key, val in self.conditions.items()
+                },
+            )
 
 
 def get_pymatgen(crystal_array):
@@ -202,8 +241,38 @@ def parse_conditions(cond_string: str | None) -> dict:
     return conditions
 
 
-def parse_wyckoff():  # Li1x4a_Li1x4b_Li6x4c_Li7x8d
-    pass
+def parse_wyckoff(wyckoff_string: str):  # 39_Li1x4a_Li1x4b_Li6x4c_Li7x8d
+    spg, *orbits = wyckoff_string.split('_')
+    spg = int(spg)
+    elements, occupations, letters, multiplicities = [], [], [], []
+    for orbit in orbits:
+        m = re.match(r'(?P<element>([A-Z][a-z]?))(?P<occupation>(\d+))x(?P<letter>((?P<multiplicity>\d+)\w))', orbit)
+        if m is None:
+            raise ValueError(f"parse wyckoff error: {orbit}")
+        elements.append(m.group('element'))
+        occupations.append(int(m.group('occupation')))
+        letters.append(m.group('letter'))
+        multiplicities.append(int(m.group('multiplicity')))
+
+    elements_on_orbit = [elem for elem, occ in zip(elements, occupations) for _ in range(occ)]
+    letters_on_orbit = [letter for letter, occ in zip(letters, occupations) for _ in range(occ)]
+    multiplicities_on_orbit = [mul for mul, occ in zip(multiplicities, occupations) for _ in range(occ)]
+    num_atoms = sum(multiplicities_on_orbit)
+
+    spacegroup = spg
+    atom_types = np.array(list(chain.from_iterable([Element(elem).Z] * mul for elem, mul in zip(elements_on_orbit, multiplicities_on_orbit))))
+    ops = np.array([op.affine_matrix for letter in letters_on_orbit for op in wp.from_group_and_letter(spg, letter)])
+    ops_inv = np.linalg.pinv(ops[:, :3, :3])
+    anchor_index = np.repeat(np.cumsum([0] + multiplicities_on_orbit[:-1]), multiplicities_on_orbit)
+
+    return {
+        "spacegroup": spacegroup,
+        "num_atoms": num_atoms,
+        "atom_types": atom_types,
+        "ops": ops,
+        "ops_inv": ops_inv,
+        "anchor_index": anchor_index,
+    }
 
 
 
@@ -217,15 +286,15 @@ def main(args):
         formula_list, num_evals_list, conditions_list = load_formula_tabular_file(args.formula_file)
         if num_evals_list is None:
             num_evals_list = [args.num_evals for _ in formula_list]
-        if args.guide_factor is None:
-            conditions_list = [{}] * len(formula_list)
+        # if args.guide_factor is None:
+        #     conditions_list = [{}] * len(formula_list)
     else:
         formula_list = args.formula
         num_evals_list = [args.num_evals]
         conditions_list = [{}] * len(formula_list)
 
     # update argument conditions
-    arg_conditions = parse_conditions(args.conditions) if args.guide_factor is not None else {}
+    arg_conditions = parse_conditions(args.conditions)
     for c in conditions_list:
         c.update(arg_conditions)
 
@@ -233,9 +302,14 @@ def main(args):
         conditions_df = pd.DataFrame(conditions_list)
         normed_conditions = {}  # {A: [1, 2]}
         for k, v in conditions_df.to_dict('list').items():
-            scaler_index = cfg.data.properties.index(k)
-            normed_conditions[k] = model.scalers[scaler_index].transform(v)
+            if k in cfg.data.properties:
+                scaler_index = cfg.data.properties.index(k)
+                normed_conditions[k] = model.scalers[scaler_index].transform(v)
+            else:
+                normed_conditions[k] = v
         normed_conditions_list = list(pd.DataFrame(normed_conditions).T.to_dict().values())
+    else:
+        normed_conditions_list = conditions_list
 
     if torch.cuda.is_available():
         model.to('cuda')
@@ -244,6 +318,7 @@ def main(args):
         SampleDataset(formula, num_evals, conditions=normed_conditions)
         for formula, num_evals, normed_conditions in zip(formula_list, num_evals_list, normed_conditions_list)
     )
+    print(test_set[0])
     test_loader = DataLoader(test_set, batch_size=args.batch_size)
 
     start_time = time.time()
