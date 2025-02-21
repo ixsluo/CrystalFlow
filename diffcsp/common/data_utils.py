@@ -906,9 +906,9 @@ def get_max_neighbors_mask(
     # Sort neighboring atoms based on distance
     distance_sort, index_sort = torch.sort(distance_sort, dim=1)
     # Select the max_num_neighbors_threshold neighbors that are closest
-    distance_real_cutoff = distance_sort[:,max_num_neighbors_threshold].reshape(-1,1).expand(-1,max_num_neighbors) + 0.01
+    distance_real_cutoff = distance_sort[:,max_num_neighbors_threshold].reshape(-1,1).expand(-1,max_num_neighbors) + 1e-5  # plus additional epsilon, the smaller the more accurate
     
-    mask_distance = distance_sort < distance_real_cutoff
+    mask_distance = distance_sort < distance_real_cutoff  # may results more than `max_num_neighbors_threshold` if there are other values near cutoff within epsilon
     
     index_sort = index_sort + index_neighbor_offset.view(-1, 1).expand(
         -1, max_num_neighbors
