@@ -175,10 +175,13 @@ python scripts/sample.py --model_path <model_path> --save_path <save_path> --for
 
 The main framework of this codebase is build upon [DiffCSP](https://github.com/txie-93/cdvae). For the datasets, Perov-5, Carbon-24 and MP-20 are from [CDVAE](https://github.com/txie-93/cdvae), and MPTS-52 is from [DiffCSP](https://github.com/txie-93/cdvae) (originaly from [codebase](https://github.com/sparks-baird/mp-time-split)).
 
+The MindSpore implementation can be found in XXX.
+
 ### Citation
 
 Please consider citing our work if you find it helpful:
 ```
+X. Luo et al., CrystalFlow: A Flow-Based Generative Model for Crystalline Materials, arXiv 2412.11693
 ```
 
 ### Contact
