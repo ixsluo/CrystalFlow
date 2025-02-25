@@ -2,7 +2,9 @@
 
 Implementation codes for CrystalFlow: A Flow-Based Generative Model for Crystalline Materials.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ixsluo/CrystalFlow/blob/main/LICENSE)   [**[Paper]**]()
+For MindSpore implementation please refer to XXX.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ixsluo/CrystalFlow/blob/main/LICENSE)   [**[Paper]**](https://arxiv.org/abs/2412.11693)
 
 ### Dependencies and Setup
 
@@ -174,8 +176,6 @@ python scripts/sample.py --model_path <model_path> --save_path <save_path> --for
 ### Acknowledgments
 
 The main framework of this codebase is build upon [DiffCSP](https://github.com/txie-93/cdvae). For the datasets, Perov-5, Carbon-24 and MP-20 are from [CDVAE](https://github.com/txie-93/cdvae), and MPTS-52 is from [DiffCSP](https://github.com/txie-93/cdvae) (originaly from [codebase](https://github.com/sparks-baird/mp-time-split)).
-
-The MindSpore implementation can be found in XXX.
 
 ### Citation
 
