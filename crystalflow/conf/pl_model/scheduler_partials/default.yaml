@@ -1,0 +1,10 @@
+- scheduler:
+    _target_: torch.optim.lr_scheduler.ReduceLROnPlateau
+    _partial_: true
+    factor: 0.6
+    patience: 30
+    min_lr: 1e-6
+  interval: epoch
+  frequency: 1
+  monitor: loss_train
+  strict: true
