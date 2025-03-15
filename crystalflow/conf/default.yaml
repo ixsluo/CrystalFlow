@@ -1,0 +1,19 @@
+expname: test
+logmode: offline
+
+hydra:
+  run:
+    dir: ${oc.env:HYDRA_JOBS,hydra}/crystalflow/${expname}/
+  job:
+    chdir: false
+    env_set:
+      WANDB_START_METHOD: thread
+
+defaults:
+  - data: default
+  - pl_model: default
+  - pl_model/model: default
+  - pl_model/model/vfield: default
+  - trainer: default
+  - override hydra/job_logging: custom
+  - _self_

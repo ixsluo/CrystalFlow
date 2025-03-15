@@ -1,0 +1,41 @@
+_target_: lightning.Trainer
+fast_dev_run: False # Enable this for debug purposes
+devices: 1
+accelerator: gpu
+precision: 32
+max_epochs: ${data.max_epochs}
+
+check_val_every_n_epoch: 2
+num_sanity_val_steps: 2
+accumulate_grad_batches: 1
+gradient_clip_val: 0.5
+gradient_clip_algorithm: value
+strategy: ddp_find_unused_parameters_true
+
+callbacks:
+  - _target_: lightning.pytorch.callbacks.LearningRateMonitor
+    logging_interval: step
+    log_momentum: False
+  - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    monitor: val_loss
+    mode: min
+    save_top_k: 1
+    save_last: True
+    verbose: false
+    every_n_epochs: 1
+  - _target_: lightning.pytorch.callbacks.TQDMProgressBar
+    refresh_rate: 10
+  #- _target_: mattergen.common.data.callback.SetPropertyScalers
+
+logger:
+  _target_: lightning.pytorch.loggers.WandbLogger
+  project: crystalflow
+  entity: null
+  job_type: train
+  save_dir: ${hydra:run.dir}
+  mode: ${logmode}
+  name: ${expname}
+  settings:
+    _target_: wandb.Settings
+    start_method: fork
+    _save_requirements: False
