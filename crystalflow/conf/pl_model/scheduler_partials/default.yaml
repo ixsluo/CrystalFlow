@@ -6,5 +6,5 @@
     min_lr: 1e-6
   interval: epoch
   frequency: 1
-  monitor: loss_train
+  monitor: train_loss
   strict: true

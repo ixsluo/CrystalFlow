@@ -1,1 +1,8 @@
 _target_: crystalflow.models.flow.FlowModule
+vfield: simple_gnn
+mode: csp
+lattice_polar_sigma: 0.1
+cost:
+  atom_type: 10
+  l_polar: 10
+  frac_coords: 1
