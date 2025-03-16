@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Dict, Generic, Optional, Protocol, Sequence, TypeVar, Union
+from typing import Any, Dict, Generic, Optional, Protocol, Sequence, TypeVar, Union, runtime_checkable
 
 import hydra
+import torch
 import lightning as pl
 
 import torch.nn as nn
@@ -10,18 +11,14 @@ from torch.optim import Optimizer, AdamW
 metriclogger = logging.getLogger("metrics")
 
 
-# protocal
 class OptimizerPartial(Protocol):
     """Callable to instantiate an optimizer."""
-
     def __call__(self, params: Any) -> Optimizer:
         raise NotImplementedError
 
 
-# protocal
 class SchedulerPartial(Protocol):
     """Callable to instantiate a learning rate scheduler."""
-
     def __call__(self, optimizer: Optimizer) -> Any:
         raise NotImplementedError
 
@@ -47,11 +44,12 @@ class FlowLightningModule(pl.LightningModule):
 
     def configure_optimizers(self) -> Any:
         optimizer = self._optimizer_partial(params=self.model.parameters())
+        print(optimizer)
         if self._scheduler_partials:
             lr_schedulers = [
                 {
-                    "scheduler": scheduler_dict["scheduler"](optimizer=optimizer),
                     **scheduler_dict,
+                    "scheduler": scheduler_dict["scheduler"](optimizer=optimizer),  # lazy here to init scheduler
                 }
                 for scheduler_dict in self._scheduler_partials
             ]
@@ -60,24 +58,31 @@ class FlowLightningModule(pl.LightningModule):
         else:
             return optimizer
 
+    def forward(self, *args, **kwargs):
+        with torch.autograd.set_detect_anomaly(True):
+            return self.model(*args, **kwargs)
 
-    def compute_stats(self, output_dict, prefix, **log_kwargs):
-        loss = output_dict["loss"]
-        log_dict = {f"{prefix}_{k}": v for k, v in output_dict.items()}
-        self.log_dict(log_dict, on_epoch=True, prog_bar=True, **log_kwargs)
-        return loss
+    def log_stats(self, loss_dict, prefix, **log_kwargs):
+        log_dict = {f"{prefix}_{k}": v for k, v in loss_dict.items()}
+        self.log_dict(log_dict, on_epoch=True, prog_bar=True, sync_dist=(self.trainer.num_devices > 1), **log_kwargs)
 
     def training_step(self, batch, batch_idx: int, dataloader_idx=0):
-        output_dict = self.model(batch)
-        return self.compute_stats(output_dict, prefix="train", on_step=True, batch_size=batch.batch_size)
+        output = self.model(batch)
+        loss_dict = {k: v for k, v in output.items() if k.startswith("loss")}
+        self.log_stats(loss_dict, prefix="train", on_step=None, batch_size=batch.batch_size)
+        return loss_dict["loss"]
 
     def validation_step(self, batch, batch_idx: int, dataloader_idx=0):
-        output_dict = self.model(batch)
-        return self.compute_stats(output_dict, prefix="val", on_step=True, batch_size=batch.batch_size)
+        output = self.model(batch)
+        loss_dict = {k: v for k, v in output.items() if k.startswith("loss")}
+        self.log_stats(loss_dict, prefix="val", on_step=None, batch_size=batch.batch_size)
+        return loss_dict["loss"]
 
     def test_step(self, batch, batch_idx: int, dataloader_idx=0):
-        output_dict = self.model(batch)
-        return self.compute_stats(output_dict, prefix="test", on_step=None, batch_size=batch.batch_size)
+        output = self.model(batch)
+        loss_dict = {k: v for k, v in output.items() if k.startswith("loss")}
+        self.log_stats(loss_dict, prefix="test", on_step=None, batch_size=batch.batch_size)
+        return loss_dict["loss"]
 
     def on_train_epoch_end(self) -> None:
         metrics = {"epoch": self.current_epoch}
