@@ -6,3 +6,31 @@ cost:
   atom_type: 10
   l_polar: 10
   frac_coords: 1
+properties: ${data.properties}
+property_embeddings:
+  pressure:
+    _target_: crystalflow.models.property_embeddings.PropertyEmbedding
+    name: pressure
+    # unconditional_embedding_module:
+    #   _target_: mattergen.property_embeddings.EmbeddingVector
+    #   hidden_dim: ${lightning_module.diffusion_module.model.hidden_dim}
+    # conditional_embedding_module:
+    #   _target_: mattergen.diffusion.model_utils.NoiseLevelEncoding
+    #   d_model: ${lightning_module.diffusion_module.model.hidden_dim}
+    scaler:
+      _target_: crystalflow.common.data_utils.StandardScalerTorch
+      _convert_: object
+      stats_dim: [1,]
+  formation_energy_per_atom:
+    _target_: crystalflow.models.property_embeddings.PropertyEmbedding
+    name: formation_energy_per_atom
+    # unconditional_embedding_module:
+    #   _target_: mattergen.property_embeddings.EmbeddingVector
+    #   hidden_dim: ${lightning_module.diffusion_module.model.hidden_dim}
+    # conditional_embedding_module:
+    #   _target_: mattergen.diffusion.model_utils.NoiseLevelEncoding
+    #   d_model: ${lightning_module.diffusion_module.model.hidden_dim}
+    scaler:
+      _target_: crystalflow.common.data_utils.StandardScalerTorch
+      _convert_: object
+      stats_dim: [1,]

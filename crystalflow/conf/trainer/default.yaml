@@ -1,8 +1,8 @@
 _target_: lightning.Trainer
 fast_dev_run: False # Enable this for debug purposes
-devices: 1
+devices: 2
 accelerator: gpu
-strategy: ${cond:'${.devices} > 1,ddp_find_unused_parameters_true,auto'}
+strategy: ${cond:'${.devices} > 1,ddp_find_unused_parameters_false,auto'}
 precision: 32
 max_epochs: ${data.max_epochs}
 
@@ -26,7 +26,8 @@ callbacks:
     every_n_epochs: 1
   - _target_: lightning.pytorch.callbacks.TQDMProgressBar
     refresh_rate: 10
-  #- _target_: mattergen.common.data.callback.SetPropertyScalers
+  - _target_: crystalflow.common.train_utils.CheckUnusedParameters
+  - _target_: crystalflow.common.train_utils.SetPropertyScalers
 
 logger:
   _target_: lightning.pytorch.loggers.WandbLogger

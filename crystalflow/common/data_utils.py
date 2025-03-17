@@ -4,11 +4,12 @@ import math
 import re
 import warnings
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Self
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 import scipy
 from joblib import Parallel, delayed
 from pymatgen.core.structure import Structure
@@ -21,7 +22,7 @@ from torch_geometric.data import Data
 from torch_scatter import segment_coo, segment_csr
 from tqdm import tqdm
 
-
+EPSILON = 1e-5
 
 
 class Preprocess:
@@ -1261,8 +1262,71 @@ def min_distance_sqr_pbc(cart_coords1, cart_coords2, lengths, angles,
     return return_list[0] if len(return_list) == 1 else return_list
 
 
-def array2tensor(array, dtype=torch.float):
-    if isinstance(array, torch.Tensor):
-        return array.clone().detach().to(dtype)
+def data2tensor(data, dtype=None):
+    if isinstance(data, torch.Tensor):
+        return data.to(dtype=dtype)  # may not need clone and detach
+    elif isinstance(data[0], torch.Tensor):
+        return torch.cat(data).to(dtype=dtype)
     else:
-        return torch.tensor(array, dtype=dtype)
+        return torch.tensor(data, dtype=dtype)
+
+
+class StandardScalerTorch(nn.Module):
+    """Normalizes the targets of a dataset."""
+
+    def __init__(
+        self,
+        stats_dim: tuple[int],  # dimension of mean, std stats (= X.shape[1:] for some input tensor X)
+        means: torch.Tensor = None,
+        stds: torch.Tensor = None,
+        initialized=True,  # specify is already initialized or not
+    ):
+        super().__init__()
+        # we need to make sure that we initialize means and stds with the right shapes
+        # otherwise, we cannot load checkpoints of fitted means/stds.
+        # ignore stats_dim if means and stds are provided
+        self.register_buffer("means", torch.atleast_1d(means) if means is not None else torch.zeros(stats_dim))
+        self.register_buffer("stds", torch.atleast_1d(stds) if stds is not None else torch.ones(stats_dim))
+        initialized = (means is not None) and (stds is not None) and initialized
+        self.register_buffer("initialized", torch.tensor(initialized, dtype=bool))
+
+    def fit(self, X: torch.Tensor):
+        X = data2tensor(X)
+        means = torch.atleast_1d(torch.nanmean(X, dim=0).to(self.device))
+        # https://github.com/pytorch/pytorch/issues/29372
+        stds = torch.atleast_1d(torch.std(X, dim=0, unbiased=False).to(self.device) + EPSILON)
+        self.means = means
+        self.stds = stds
+        self.initialized = torch.tensor(True, dtype=torch.bool, device=self.device)
+
+    def transform(self, X: torch.Tensor) -> torch.Tensor:
+        X = data2tensor(X)
+        return (X - self.means) / self.stds
+
+    def inverse_transform(self, X: torch.Tensor) -> torch.Tensor:
+        X = data2tensor(X)
+        return X * self.stds + self.means
+
+    @property
+    def device(self) -> torch.device:
+        return self.means.device  # type: ignore
+
+    def match_device(self, X: torch.Tensor):
+        if self.means.device != X.device:
+            self.means = self.means.to(X.device)
+            self.stds = self.stds.to(X.device)
+            self.initialized = self.initialized.to(X.device)
+
+    def copy(self) -> Self:
+        return self.__class__(
+            means=self.means.clone().detach(),
+            stds=self.stds.clone().detach(),
+            initialized=bool(self.initialized),
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            f"means: {self.means.tolist() if self.means is not None else None}, "
+            f"stds: {self.stds.tolist() if self.stds is not None else None})"
+        )

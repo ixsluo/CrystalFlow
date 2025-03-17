@@ -44,7 +44,6 @@ class FlowLightningModule(pl.LightningModule):
 
     def configure_optimizers(self) -> Any:
         optimizer = self._optimizer_partial(params=self.model.parameters())
-        print(optimizer)
         if self._scheduler_partials:
             lr_schedulers = [
                 {
