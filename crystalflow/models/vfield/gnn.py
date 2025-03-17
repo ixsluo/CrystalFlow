@@ -1,4 +1,5 @@
 import math
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -42,6 +43,7 @@ class SinusoidsEmbedding(nn.Module):
 class SimpleGNN(nn.Module):
     def __init__(
         self,
+        mode: Literal['csp', 'dng'],
         hidden_dim=128,
         num_layers=4,
         time_dim=100,
@@ -54,6 +56,7 @@ class SimpleGNN(nn.Module):
         **kwargs,
     ):
         super().__init__()
+        self.mode = mode
         self.edge_style = edge_style
         if isinstance(act_fn, nn.Module):
             self.act_fn = act_fn
@@ -72,7 +75,7 @@ class SimpleGNN(nn.Module):
             for _ in range(num_layers)
         ])
         self.final_layer_norm = nn.LayerNorm(hidden_dim) if final_layer_norm else nn.Identity()
-        self.type_readout = nn.Linear(hidden_dim, type_dim)
+        self.type_readout = nn.Linear(hidden_dim, type_dim) if self.mode == "dng" else nn.Identity()
         self.l_polar_readout = nn.Linear(hidden_dim, 6, bias=False)
         self.frac_coords_readout = nn.Linear(hidden_dim, 3, bias=False)
 

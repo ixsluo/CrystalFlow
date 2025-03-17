@@ -10,7 +10,9 @@ import torch.nn.functional as F
 from torch_scatter import scatter
 from omegaconf import DictConfig
 from tqdm import tqdm
+from hydra.utils import instantiate
 
+from crystalflow.models.property_embeddings import PropertyEmbedding
 
 
 class FlowModule(nn.Module):
@@ -20,6 +22,8 @@ class FlowModule(nn.Module):
         vfield: nn.Module,
         cost: DictConfig,
         lattice_polar_sigma: float,
+        properties: list[str],  # names of properties
+        property_embeddings: dict[str, PropertyEmbedding],  # config dicts of named property embedding modules
         *args,
         **kwargs
     ):
@@ -28,6 +32,11 @@ class FlowModule(nn.Module):
         self.vfield = vfield
         self.cost = cost
         self.lattice_polar_sigma = lattice_polar_sigma
+        self.properties = properties
+        unknown_properties = set(properties) - set(property_embeddings.keys())
+        if unknown_properties:
+            raise ValueError(f"Unknown properties: {unknown_properties}. You need to add into config `pl_model/model/default.yaml`")
+        self.property_embeddings = nn.ModuleDict({name: model for name, model in property_embeddings.items() if name in properties})
 
     def forward(self, batch):
         batch_size = batch.batch_size

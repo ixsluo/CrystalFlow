@@ -1,4 +1,5 @@
 _target_: crystalflow.models.vfield.gnn.SimpleGNN
+mode: ${..mode}
 hidden_dim: 128
 num_layers: 4
 time_dim: 256
