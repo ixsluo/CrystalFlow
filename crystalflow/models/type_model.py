@@ -2,54 +2,66 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class AtomTypeModuleBase(nn.Module):
+    pass
 
-class AtomTypeModule(nn.Module):
-    def __init__(self, encode_mode, out_dim: int|None = None, *args, **kwargs):
+
+class EmbeddingMinus1(AtomTypeModuleBase):
+    def __init__(self, dim, need_smooth: bool):
+        """Embedding minus 1
+
+        Arguments
+        ---------
+            dim: int
+                "nn.Embedding" out dim.
+            need_smooth: bool
+                Mark of needing additional smooth, usually False.
+        """
         super().__init__()
-        self.encode_mode = encode_mode
-        self.decodable = False
-        if encode_mode == "embeddingminus1":
-            self.embedding = EmbeddingMinus1(out_dim)
-            self.out_dim: int = out_dim
-        elif encode_mode == "table":
-            self.decodable = True
-            self.embedding = TypeTableModule()
-            self.out_dim: int = self.embedding.out_dim
-        else:
-            raise NotImplementedError(f"encode_mode: {encode_mode} is not supported")
+        self.dim = dim
+        self.need_smooth = need_smooth  # additional smooth, usually False
+        self.decodeable = False
 
-    def forward(self, x):
-        return self.embedding(x)
-
-    def encode(self, x):
-        return self(x)
-
-    def decode(self, x):
-        if self.decodable:
-            return self.embedding.decode_types(x)
-        else:
-            raise NotImplementedError(f"Decoding by module {self.embedding} is not supported")
-
-
-class EmbeddingMinus1(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
         self.model = nn.Embedding(100, dim)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         return self.model(x - 1)
 
+    def encode_types(self, x):
+        return self(x)
 
-class TypeTableModule(nn.Module):
-    def __init__(self):
+    def decode_types(self, x):
+        # WARNING: this is only for placeholder, you should never use it
+        raise NotImplementedError("Not decodeable, you should not use this")
+        return torch.argmax(x, dim=-1)
+
+    def random_encoding_from(self, atom_types: torch.Tensor):
+        return self(atom_types).clone().detach()
+
+
+class TypeTableModule(AtomTypeModuleBase):
+    def __init__(self, dim, need_smooth: bool):
+        """Custom type table onehot
+
+        Arguments
+        ---------
+            dim: int
+                Out dim, MUST be 28.
+            need_smooth: bool
+                Mark of needing additional smooth, usually True.
+        """
         super().__init__()
+        self.num_row = 13
+        self.num_col = 15
+        assert dim == self.num_row + self.num_col, "dim must be 28"
+        self.dim = self.num_row + self.num_col
+        self.need_smooth = need_smooth  # additional smooth, usually True
+        self.decodeable = True
+
         self.register_buffer("reordered_map", reordered_map)
         self.register_buffer("reordered_indices", reordered_indices)
         mask = torch.where(self.reordered_map > 0, 1.0, 0.0)
         self.register_buffer("mask", mask)
-        self.num_row = 13
-        self.num_col = 15
-        self.out_dim = 28
 
     def forward(self, atom_types: torch.Tensor):
         return self.encode_types(atom_types)
@@ -73,9 +85,8 @@ class TypeTableModule(nn.Module):
         atom_types = self.reordered_map[[row_indices, col_indices]]
         return atom_types
 
-    def get_rd_encoded_types(self, num_nodes: int, device=None):
-        encoded_types = torch.randn((num_nodes, self.out_dim), device=device)
-        return encoded_types
+    def random_encoding_from(self, atom_types: torch.Tensor):
+        return torch.randn((atom_types.shape[0], self.dim), device=atom_types.device)
 
 
 reordered_table = [

@@ -6,8 +6,6 @@ import torch.nn as nn
 from torch_geometric.utils import to_dense_adj, dense_to_sparse
 from torch_scatter import scatter
 
-from crystalflow.models.type_model import AtomTypeModule
-
 
 class SinusoidalTimeEmbeddings(nn.Module):
     """Attention is all you need."""
@@ -43,19 +41,21 @@ class SinusoidsEmbedding(nn.Module):
 class SimpleGNN(nn.Module):
     def __init__(
         self,
-        mode: Literal['csp', 'dng'],
-        hidden_dim=128,
-        num_layers=4,
-        time_dim=100,
-        frac_emb_freq=128,
+        mode: Literal['CSP', 'DNG'],
+        type_dim: int,
+        type_need_smooth: bool,
+        time_dim: int,
+        hidden_dim: int,
+        num_layers: int,
+        frac_emb_freq: int,
         edge_style="fc",
         act_fn: str|nn.Module = "",
         final_layer_norm: bool = True,
-        type_model=AtomTypeModule,
         *args,
         **kwargs,
     ):
         super().__init__()
+
         self.mode = mode
         self.edge_style = edge_style
         if isinstance(act_fn, nn.Module):
@@ -64,10 +64,14 @@ class SimpleGNN(nn.Module):
             self.act_fn = nn.SiLU()
         else:
             raise NotImplementedError(f"act_fn: {act_fn} not supported")
+
         self.time_embedding = SinusoidalTimeEmbeddings(time_dim)
-        self.type_embedding = type_model
-        type_dim = self.type_embedding.out_dim
-        self.node_embedding = nn.Linear(type_dim + time_dim, hidden_dim)
+        if type_need_smooth:
+            self.type_smooth = nn.Linear(type_dim, hidden_dim)
+        else:
+            self.type_smooth = nn.Identity()
+
+        self.node_embedding = nn.Linear(hidden_dim + time_dim, hidden_dim)
         self.frac_embedding = SinusoidsEmbedding(frac_emb_freq)
         edge_dim = self.frac_embedding.dim + 6
         self.gnn_layers = nn.ModuleList([
@@ -75,7 +79,11 @@ class SimpleGNN(nn.Module):
             for _ in range(num_layers)
         ])
         self.final_layer_norm = nn.LayerNorm(hidden_dim) if final_layer_norm else nn.Identity()
-        self.type_readout = nn.Linear(hidden_dim, type_dim) if self.mode == "dng" else nn.Identity()
+
+        if self.mode == "DNG":
+            self.type_readout = nn.Linear(hidden_dim, type_dim)
+        else:
+            self.type_readout = nn.Identity()
         self.l_polar_readout = nn.Linear(hidden_dim, 6, bias=False)
         self.frac_coords_readout = nn.Linear(hidden_dim, 3, bias=False)
 
@@ -94,13 +102,18 @@ class SimpleGNN(nn.Module):
         edge_features = torch.cat([frac_diff_emb, l_polar[edge2graph]], dim=1)
         return edge_features
 
-    def forward(self, t, num_atoms, atom_types, frac_coords, l_polar, node2graph):
-        edge_index, frac_diff = self.gen_edges(num_atoms, frac_coords, node2graph)
-        edge2graph = node2graph[edge_index[0]]
-        type_emb = self.type_embedding(atom_types)
+    def build_node_features(self, t, atom_types, num_atoms):
+        type_emb = self.type_smooth(atom_types)
         time_emb = self.time_embedding(t).repeat_interleave(num_atoms, dim=0)
         node_features = torch.cat([type_emb, time_emb], dim=1)
         node_features = self.node_embedding(node_features)
+        return node_features
+
+    def forward(self, t, num_atoms, atom_types, frac_coords, l_polar, node2graph):
+        # this atom_types is alread encoded
+        edge_index, frac_diff = self.gen_edges(num_atoms, frac_coords, node2graph)
+        edge2graph = node2graph[edge_index[0]]
+        node_features = self.build_node_features(t, atom_types, num_atoms)
         edge_features = self.build_edge_features(frac_coords, l_polar, edge_index, edge2graph)
         for layer in self.gnn_layers:
             node_features = layer(
@@ -111,6 +124,7 @@ class SimpleGNN(nn.Module):
             )
         node_features = self.final_layer_norm(node_features)
         graph_features = scatter(node_features, node2graph, dim=0, reduce='mean')
+
         type_pred = self.type_readout(node_features)
         l_polar_pred = self.l_polar_readout(graph_features)
         frac_coords_pred = self.frac_coords_readout(node_features)

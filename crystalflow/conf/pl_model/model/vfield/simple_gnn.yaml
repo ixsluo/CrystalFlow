@@ -1,13 +1,11 @@
 _target_: crystalflow.models.vfield.gnn.SimpleGNN
 mode: ${..mode}
-hidden_dim: 128
-num_layers: 4
+type_dim: ${..type_model.dim}
+type_need_smooth: ${..type_model.need_smooth}
 time_dim: 256
-frac_emb_freq: 128
+hidden_dim: 512
+num_layers: 6
+frac_emb_freq: 256
 edge_style: fc
 act_fn: silu
 final_layer_norm: true
-type_model:
-  _target_: crystalflow.models.type_model.AtomTypeModule
-  encode_mode: embeddingminus1
-  out_dim: 128

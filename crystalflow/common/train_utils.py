@@ -20,6 +20,7 @@ class AddConfigCallback(Callback):
 
 
 class SetPropertyScalers(Callback):
+    """Set property scalers in model. Won't set again if the scaler is already marked initialized"""
     def setup(self, trainer: pl.Trainer, pl_module: pl.LightningModule, stage):  # Called when fit, validate, test, predict, or tune begins.
         if stage != 'fit':
             return
