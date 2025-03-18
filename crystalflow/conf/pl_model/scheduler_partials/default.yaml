@@ -3,7 +3,7 @@
     _partial_: true
     factor: 0.6
     patience: 30
-    min_lr: 1e-6
+    min_lr: 1e-4
   interval: epoch
   frequency: 1
   monitor: train_loss

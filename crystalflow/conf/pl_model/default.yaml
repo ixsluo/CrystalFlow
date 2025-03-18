@@ -1,5 +1,6 @@
 _target_: crystalflow.models.pl_model.FlowLightningModule
 defaults:
+  - model: crystalflow
   - optimizer_partial: adam
   - scheduler_partials: default
   - _self_

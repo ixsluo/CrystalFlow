@@ -30,6 +30,8 @@ def main(config: DictConfig):
     if config.data.get('debug', False):
         pprint(config_as_dict)
         print(pl_model)
+        print(pl_model.model.type_model)
+        print(pl_model.model.vfield)
         #trainer.strategy.connect(pl_model)
         #print(pl_model.optimizers)
         print("For debug, exit")
