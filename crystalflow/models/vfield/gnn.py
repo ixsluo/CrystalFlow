@@ -71,7 +71,7 @@ class SimpleGNN(nn.Module):
         else:
             self.type_smooth = nn.Identity()
 
-        self.node_embedding = nn.Linear(hidden_dim + time_dim, hidden_dim)
+        self.node_align = nn.Linear(hidden_dim + time_dim, hidden_dim)
         self.frac_embedding = SinusoidsEmbedding(frac_emb_freq)
         edge_dim = self.frac_embedding.dim + 6
         self.gnn_layers = nn.ModuleList([
@@ -106,7 +106,7 @@ class SimpleGNN(nn.Module):
         type_emb = self.type_smooth(atom_types)
         time_emb = self.time_embedding(t).repeat_interleave(num_atoms, dim=0)
         node_features = torch.cat([type_emb, time_emb], dim=1)
-        node_features = self.node_embedding(node_features)
+        node_features = self.node_align(node_features)
         return node_features
 
     def forward(self, t, num_atoms, atom_types, frac_coords, l_polar, node2graph):
@@ -155,17 +155,19 @@ class SimpleGNNLayer(nn.Module):
         self.layer_norm = nn.LayerNorm(hidden_dim) if layer_norm else nn.Identity()
 
     def forward(self, node_features, edge_features, edge_index, edge2graph):
+        node_features_in = node_features
+        node_features = self.layer_norm(node_features)
         message = self.message_model(node_features, edge_features, edge_index)
         message = scatter(message, edge_index[0], dim=0, reduce="mean", dim_size=node_features.shape[0])
-        node_features = node_features + self.agg_model(node_features, message)
-        return node_features
+        node_features_out = node_features_in + self.agg_model(node_features, message)
+        return node_features_out
 
     def message_model(self, node_features, edge_features, edge_index):
-        node_features = self.layer_norm(node_features)
         hi, hj = node_features[edge_index[0]], node_features[edge_index[1]]
         mij = self.message_mlp(torch.cat([hi, hj, edge_features], dim=1))
         return mij
 
     def agg_model(self, node_features, message):
-        agg = self.agg_mlp(torch.cat([node_features, message], dim=1))
+        agg = torch.cat([node_features, message], dim=1)
+        agg = self.agg_mlp(agg)
         return agg
