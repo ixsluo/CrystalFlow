@@ -4,8 +4,9 @@ from typing import Any, Dict, Generic, Optional, Protocol, Sequence, TypeVar, Un
 import hydra
 import torch
 import lightning as pl
-
 import torch.nn as nn
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from torch.optim import Optimizer, AdamW
 
 metriclogger = logging.getLogger("metrics")
@@ -41,6 +42,31 @@ class FlowLightningModule(pl.LightningModule):
         self._optimizer_partial = optimizer_partial or get_default_optimizer
         self._scheduler_partials = scheduler_partials or []
         self.save_hyperparameters(ignore=("model", "optimizer_partial", "scheduler_partials"))
+
+    @classmethod
+    def load_from_checkpoint(
+        cls,
+        checkpoint_path,
+        map_location=None,
+        hparams_file=None,
+        strict: Optional[bool] = None,
+        **kwargs: Any,
+    ):
+        ckpt = torch.load(checkpoint_path)
+        config = DictConfig(ckpt["config"])
+        model=instantiate(config.pl_model.model)
+        optimizer_partial=instantiate(config.pl_model.optimizer_partial)
+        scheduler_partials=instantiate(config.pl_model.scheduler_partials)
+        return super().load_from_checkpoint(
+            checkpoint_path,
+            map_location,
+            hparams_file,
+            strict,
+            model=model,
+            optimizer_partial=optimizer_partial,
+            scheduler_partials=scheduler_partials,
+            **kwargs,
+        )
 
     def configure_optimizers(self) -> Any:
         optimizer = self._optimizer_partial(params=self.model.parameters())
