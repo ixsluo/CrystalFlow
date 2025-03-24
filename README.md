@@ -21,7 +21,7 @@ pip install lightning==2.3.2
 pip install hydra-core omegaconf python-dotenv wandb rich
 pip install p_tqdm pymatgen pyxtal smact matminer einops chemparse torchdyn
 pip install -e .
-mkdir log
+mkdir -p log hydra
 ```
 
 Rename the `.env.template` file into `.env` and specify the following variables.
@@ -40,7 +40,13 @@ export   HYDRA_JOBS="/home/<YOURHOME>/CrystalFlow/hydra"
 export    WANDB_DIR="/home/<YOURHOME>/CrystalFlow/log"
 ```
 
+### Datasets
+
+MP20 and MPTS52 datasets are provided in `dataset/mp_20` and `dataset/mpts_52`.
+
 ### Training
+
+test passed on version `v1.0.0-alpha.1`.
 
 Pretrained checkpoints are provided in [Releases](https://github.com/ixsluo/CrystalFlow/releases).
 
@@ -64,6 +70,10 @@ logging.wandb.project=crystalflow-gridtest \
 expname=CSP-mp20 \
       > CSP-mp20.log 2>&1 &
 ```
+
+The checkpoints and other files will be in `hydra/singlerun/CSP-mp20`.
+
+Run time on RTX-4090 is about 24 hours.
 
 #### For CSP task on MP-CALYPSO-60 dataset with pressure conditioning
 
@@ -148,29 +158,50 @@ expname=DNG-mp20-Eform \
 One sample
 
 ```bash
-python scripts/evaluate.py --model_path <model_path> --dataset <dataset>
-python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv
+python /path/to/scripts/evaluate.py --model_path <model_path> --dataset <dataset> --label <label>
+python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --label <previous-label>
 ```
+
+Results will be saved to the same dir as `model_path`.
 
 Multiple samples
 
 ```bash
-python scripts/evaluate.py --model_path <model_path> --dataset <dataset> --num_evals 20
-python scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --multi_eval
+python /path/to/scripts/evaluate.py --model_path <model_path> --dataset <dataset> --num_evals 20 --label <label>
+python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --multi_eval --label <previous-label>
+```
+
+Results will be saved to the same dir as `model_path`.
+
+##### extract CSP generation
+
+```bash
+python /path/to/scripts/extract_gen.py eval_gen_<label>.pt --task eval
+# will save to eval_gen_<label>.dir
 ```
 
 #### DNG generation
 
 ```bash
-python scripts/generation.py --model_path <model_path> --dataset <dataset>
-python scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv
+python /path/to/scripts/generation.py --model_path <model_path> --dataset <dataset> --label <label>
+python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv --label <previous-label>
+```
+
+Results will be saved to the same dir as `model_path`.
+
+##### extract DNG generation
+
+```bash
+python /path/to/scripts/extract_gen.py eval_gen_<label>.pt --task gen
+# will save to eval_gen_<label>.dir
 ```
 
 
 #### Sample from arbitrary composition
 
 ```bash
-python scripts/sample.py --model_path <model_path> --save_path <save_path> --formula <formula> --num_evals <num_evals>
+python /path/to/scripts/sample.py --model_path <model_path> --save_path <save_path> --formula <formula> --num_evals <num_evals>
+# will save to the <save_path>
 ```
 
 ### Acknowledgments
