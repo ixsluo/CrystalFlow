@@ -104,14 +104,14 @@ def get_datamodule(cfg, scaler_path=None):
     return datamodule
 
 
-def get_model(cfg):
+def get_model(cfg_model, cfg_optim, cfg_data, cfg_logging):
     # Instantiate model
-    hydra.utils.log.info(f"Instantiating <{cfg.model._target_}>")
+    hydra.utils.log.info(f"Instantiating <{cfg_model._target_}>")
     model: pl.LightningModule = hydra.utils.instantiate(
-        cfg.model,
-        optim=cfg.optim,
-        data=cfg.data,
-        logging=cfg.logging,
+        cfg_model,
+        optim=cfg_optim,
+        data=cfg_data,
+        logging=cfg_logging,
         _recursive_=False,
     )
     return model
@@ -141,6 +141,13 @@ def find_ckpt(ckpt_dir) -> str | None:
     return ckpt
 
 
+def find_cfg(ckpt_dir) -> DictConfig:
+    hparams_file = Path(ckpt_dir).joinpath("hparams.yaml")
+    if not hparams_file.exists():
+        raise FileNotFoundError(f"{hparams_file}")
+    return OmegaConf.load(hparams_file)
+
+
 def save_cfg(cfg, save_dir):
     yaml_conf: str = OmegaConf.to_yaml(cfg=cfg)
     (save_dir / "hparams.yaml").write_text(yaml_conf)
@@ -166,7 +173,7 @@ def find_finetune_schedule(cfg, finetune_dir, model=None):
                   # - model.albert.pooler.*  # regex is allowed"""))
             for name, param in model.named_parameters():
                 f.write(f"  - {name}\n")
-        return
+        raise SystemExit(f"Finetune scheduler template written in {ft_schedule}. You should edit it and then run again to start finetune.")
     else:
         if not Path(ft_schedule).exists():
             raise FileNotFoundError(
@@ -202,7 +209,7 @@ def run(cfg: DictConfig) -> None:
     save_cfg(cfg, run_dir)
 
     datamodule = get_datamodule(cfg, scaler_path=None)
-    model = get_model(cfg)
+    model = get_model(cfg.model, cfg.optim, cfg.data, cfg.logging)
     pass_and_save_scaler(model, datamodule, run_dir)
 
     # Logger instantiation/configuration
@@ -264,9 +271,13 @@ def finetune(cfg):
         cfg.logging.wandb.mode = "offline"
     save_cfg(cfg, run_dir)
 
+    ori_cfg = find_cfg(finetune_from_dir)
+
     datamodule = get_datamodule(cfg, scaler_path=finetune_from_dir)
-    model = get_model(cfg)
+    model = get_model(ori_cfg.model, cfg.optim, cfg.data, cfg.logging)
     pass_and_save_scaler(model, datamodule, run_dir)
+
+    ft_schedule = find_finetune_schedule(cfg, run_dir, model)
 
     ckpt = find_ckpt(finetune_from_dir)
     model = model.__class__.load_from_checkpoint(ckpt)
@@ -280,7 +291,6 @@ def finetune(cfg):
         log_freq=cfg.logging.wandb_watch.log_freq,
     )
 
-    ft_schedule = find_finetune_schedule(cfg, run_dir, model)
     callbacks = build_callbacks(cfg)
     callbacks.append(FinetuningScheduler(ft_schedule=ft_schedule))
     trainer = pl.Trainer(
