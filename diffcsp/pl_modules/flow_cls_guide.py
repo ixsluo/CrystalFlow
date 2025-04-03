@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 import numpy as np
 import omegaconf
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

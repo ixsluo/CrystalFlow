@@ -4,7 +4,7 @@ import hydra
 import numpy as np
 import omegaconf
 import torch
-import pytorch_lightning as pl
+import lightning as pl
 import torch.nn as nn
 from torch.nn import functional as F
 from torch_scatter import scatter

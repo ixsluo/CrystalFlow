@@ -5,7 +5,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 import omegaconf
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 from omegaconf import DictConfig
 from torch.utils.data import Dataset
@@ -81,7 +81,7 @@ class CrystDataModule(pl.LightningDataModule):
         construct datasets and assign data scalers.
         """
         if stage is None or stage == "fit":
-            if not hasattr(self, "train_dataset"):
+            if not hasattr(self, "train_dataset") or (self.train_dataset is None):
                 self.train_dataset = hydra.utils.instantiate(self.datasets.train)
             self.val_datasets = [
                 hydra.utils.instantiate(dataset_cfg)

@@ -17,7 +17,7 @@ conda activate crystalflow
 pip install torch==2.3.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 pip install torch_geometric==2.5.3
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.3.0+cu121.html
-pip install lightning==2.3.2
+pip install lightning==2.3.2 finetuning_scheduler
 pip install hydra-core omegaconf python-dotenv wandb rich
 pip install p_tqdm pymatgen pyxtal smact matminer einops chemparse torchdyn
 pip install -e .
@@ -158,7 +158,7 @@ expname=DNG-mp20-Eform \
 One sample
 
 ```bash
-python /path/to/scripts/evaluate.py --model_path <model_path> --dataset <dataset> --label <label>
+python /path/to/scripts/evaluate.py --model_path <model_path> --ode-int-steps 100 --dataset <dataset> --anneal_coords --anneal_slope 5 --label <label>
 python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --label <previous-label>
 ```
 
@@ -167,7 +167,7 @@ Results will be saved to the same dir as `model_path`.
 Multiple samples
 
 ```bash
-python /path/to/scripts/evaluate.py --model_path <model_path> --dataset <dataset> --num_evals 20 --label <label>
+python /path/to/scripts/evaluate.py --model_path <model_path> --ode-int-steps 100 --dataset <dataset> --num_evals 20 --anneal_coords --anneal_slope 5 --label <label>
 python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks csp --gt_file data/<dataset>/test.csv --multi_eval --label <previous-label>
 ```
 
@@ -183,7 +183,7 @@ python /path/to/scripts/extract_gen.py eval_gen_<label>.pt --task eval
 #### DNG generation
 
 ```bash
-python /path/to/scripts/generation.py --model_path <model_path> --dataset <dataset> --label <label>
+python /path/to/scripts/generation.py --model_path <model_path> --ode-int-steps 100 --dataset <dataset> --label <label>
 python /path/to/scripts/compute_metrics.py --root_path <model_path> --tasks gen --gt_file data/<dataset>/test.csv --label <previous-label>
 ```
 
@@ -200,7 +200,7 @@ python /path/to/scripts/extract_gen.py eval_gen_<label>.pt --task gen
 #### Sample from arbitrary composition
 
 ```bash
-python /path/to/scripts/sample.py --model_path <model_path> --save_path <save_path> --formula <formula> --num_evals <num_evals>
+python /path/to/scripts/sample.py --model_path <model_path> --ode-int-steps 100 --save_path <save_path> --formula <formula> --num_evals <num_evals> --anneal_coords --anneal_slope 5
 # will save to the <save_path>
 ```
 

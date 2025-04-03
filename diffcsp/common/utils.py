@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 import dotenv
-import pytorch_lightning as pl
+import lightning as pl
 from omegaconf import DictConfig, OmegaConf
 
 
