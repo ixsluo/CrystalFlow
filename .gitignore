@@ -78,6 +78,7 @@ target/
 # Jupyter Notebook
 .ipynb_checkpoints
 notebooks/
+*.ipynb
 
 # IPython
 profile_default/
@@ -161,6 +162,8 @@ cython_debug/
 #.idea/
 .vscode/
 
+.vscode/
+
 tmp/
 singlerun/
 wandb/
@@ -170,3 +173,4 @@ hydra/
 log/
 data/
 test*
+datasets/

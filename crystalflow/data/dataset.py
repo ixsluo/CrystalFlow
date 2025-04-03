@@ -16,8 +16,8 @@ class GraphDataset(Dataset):
         self,
         raw_file,
         cache_file,
-        properties: list[str],
         preprocess: Preprocess,
+        properties: list[str] = None,
         *args,
         **kwargs,
     ):
@@ -44,10 +44,17 @@ class GraphDataset(Dataset):
         else:
             print(f"Loading {cache_file} ...")
             self.cache_data = torch.load(cache_file)
-        self.cache_data = [Data.from_dict(d) for d in self.cache_data]
+        self.properties = [] if properties is None else properties
+        self.structural_keys = [
+            "material_id", "atom_types", "num_atoms", "num_nodes",
+            "lengths", "angles", "l_polar",
+            "frac_coords", "cart_coords",
+            "edge_index", "to_jimages",
+        ]
+        self.required_keys = self.structural_keys + self.properties
 
     def __len__(self):
         return len(self.cache_data)
 
     def __getitem__(self, index) -> Data:
-        return self.cache_data[index]
+        return Data.from_dict({k: v for k, v in self.cache_data[index].items() if k in self.required_keys})
