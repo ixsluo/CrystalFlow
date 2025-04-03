@@ -1,3 +1,0 @@
-_target_: crystalflow.models.type_model.EmbeddingMinus1
-dim: ${..vfield.hidden_dim}
-need_smooth: false  # if false, makesure the dim is same as ..vfield.hidden_dim

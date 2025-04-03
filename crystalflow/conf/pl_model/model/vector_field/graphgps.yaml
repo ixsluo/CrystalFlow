@@ -1,0 +1,9 @@
+_target_: crystalflow.models.vector_field.graphgps.GraphGPS
+_partial_: true
+time_dim: 256
+hidden_dim: 512
+num_layers: 6
+frac_emb_freq: 256
+edge_style: fc
+act_fn: silu
+final_layer_norm: true
