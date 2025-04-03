@@ -1,0 +1,2 @@
+_target_: crystalflow.models.frac_coords_probpath.WrapGaussianPathUnion
+_partial_: true

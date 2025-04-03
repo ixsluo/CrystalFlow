@@ -1,0 +1,43 @@
+_target_: crystalflow.data.datamodule.GraphDataModule
+root_path: ${oc.env:PROJECT_ROOT}/datasets/mp_20
+max_epochs: 2
+properties: [
+  # formation_energy_per_atom,
+]
+preprocess:
+  _target_: crystalflow.common.data_utils.Preprocess
+  workers: 30
+  niggli: true
+  primitive: true
+  graph_method: none
+  tolerance: 0.01
+  use_wyckoff: false
+  exclude: ["elements", "Unnamed.*", '.*\.conv']  # regular expression of excluded keys
+
+train_datasets:
+  - _target_: crystalflow.data.dataset.GraphDataset
+    raw_file: ${data.root_path}/train.csv
+    cache_file: ${data.root_path}/train_ori.pt
+    properties: ${data.properties}
+    preprocess: ${data.preprocess}
+val_datasets:
+  - _target_: crystalflow.data.dataset.GraphDataset
+    raw_file: ${data.root_path}/val.csv
+    cache_file: ${data.root_path}/val_ori.pt
+    properties: ${data.properties}
+    preprocess: ${data.preprocess}
+test_datasets:
+  - _target_: crystalflow.data.dataset.GraphDataset
+    raw_file: ${data.root_path}/test.csv
+    cache_file: ${data.root_path}/test_ori.pt
+    properties: ${data.properties}
+    preprocess: ${data.preprocess}
+
+num_workers:
+  train: 0
+  val: 0
+  test: 0
+batch_size:
+  train: 256
+  val: 128
+  test: 128

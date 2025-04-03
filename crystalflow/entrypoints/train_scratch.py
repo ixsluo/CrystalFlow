@@ -1,6 +1,6 @@
-import yaml
 from pprint import pprint
 
+import yaml
 import hydra
 import lightning as pl
 from hydra.utils import instantiate
@@ -9,7 +9,7 @@ from lightning.pytorch.cli import SaveConfigCallback
 from omegaconf import DictConfig, OmegaConf
 
 from crystalflow.common.globals import PACKAGE_ROOT
-from crystalflow.common.train_utils import AddConfigCallback, WandbWatcher
+from crystalflow.common.train_utils import AddConfigCallback, WandbWatcher, setting_before_training
 
 
 class SimpleParser:
@@ -22,6 +22,7 @@ class SimpleParser:
 def main(config: DictConfig):
     config_as_dict = OmegaConf.to_container(config, resolve=True)
 
+    setting_before_training(config)
     pl_model: pl.LightningModule = instantiate(config.pl_model)
     pl_data: pl.LightningDataModule = instantiate(config.data)
     trainer: pl.Trainer = instantiate(config.trainer)
