@@ -1,6 +1,9 @@
 expname: test
 logmode: offline
 
+random_seed: 42
+float32_matmul_precision: high
+
 hydra:
   run:
     dir: ${oc.env:HYDRA_JOBS,hydra}/crystalflow/${expname}/

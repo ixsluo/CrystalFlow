@@ -23,6 +23,7 @@ from torch_scatter import segment_coo, segment_csr
 from tqdm import tqdm
 
 EPSILON = 1e-5
+MAX_ATOMIC_NUMBER = 100
 
 
 class Preprocess:

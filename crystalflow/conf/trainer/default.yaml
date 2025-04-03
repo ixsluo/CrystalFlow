@@ -5,6 +5,7 @@ accelerator: gpu
 strategy: ${cond:'${.devices} > 1,ddp_find_unused_parameters_false,auto'}
 precision: 32
 max_epochs: ${data.max_epochs}
+deterministic: True
 
 check_val_every_n_epoch: 2
 num_sanity_val_steps: 2
@@ -22,7 +23,7 @@ callbacks:
     mode: min
     save_top_k: 1
     save_last: True
-    verbose: false
+    verbose: False
     every_n_epochs: 1
   - _target_: lightning.pytorch.callbacks.TQDMProgressBar
     refresh_rate: 10

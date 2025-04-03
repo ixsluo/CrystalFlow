@@ -1,12 +1,13 @@
 _target_: crystalflow.models.flow.FlowModule
-mode: CSP
 defaults:
-  - vfield: simple_gnn
-  - type_model: embeddingminus1
-lattice_polar_sigma: 0.1
+  - vector_field: simple_gnn
+  - scheduler: CondOTScheduler
+  - types_probpath: EmbeddingMinus1
+  - lattice_probpath: LatticePolar
+  - frac_coords_probpath: WrapGaussian
 cost:
   atom_types: 10
-  l_polar: 1
+  lattice: 1
   frac_coords: 10
 properties: ${data.properties}
 property_embeddings:

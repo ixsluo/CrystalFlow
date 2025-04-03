@@ -1,0 +1,5 @@
+_target_: crystalflow.models.types_probpath.TypeTablePathUnion
+_partial_: true
+probpath:
+  _target_: flow_matching.path.AffineProbPath
+  _partial_: true

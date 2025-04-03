@@ -1,0 +1,6 @@
+_target_: crystalflow.models.types_probpath.DiscreteEmbeddingPathUnion
+_partial_: true
+probpath:
+  _target_: flow_matching.path.MixtureDiscreteProbPath
+  _partial_: true
+source_distr: uniform  # mask or uniform

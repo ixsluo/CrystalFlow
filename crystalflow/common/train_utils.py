@@ -3,11 +3,19 @@ from typing import Any
 import torch
 import torch.nn as nn
 import lightning as pl
+from lightning import seed_everything
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.utilities import rank_zero_only
+from omegaconf import DictConfig
 
 from crystalflow.common.data_utils import StandardScalerTorch
 from crystalflow.models.property_embeddings import PropertyEmbedding
+
+
+def setting_before_training(config: DictConfig):
+    torch.set_float32_matmul_precision(config.float32_matmul_precision)
+    if config.trainer.deterministic:
+        seed_everything(config.random_seed, workers=True)
 
 
 class AddConfigCallback(Callback):
