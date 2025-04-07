@@ -1,0 +1,37 @@
+# python logging configuration for tasks
+version: 1
+formatters:
+  simple:
+    format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+filters:
+  metrics_filter:
+    (): logging.Filter
+    name: metrics  # filter logger whose name is metrics
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    formatter: simple
+    # absolute file path
+    filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+  metrics:
+    class: logging.FileHandler
+    formatter: simple
+    # filters:
+    #   - metrics_filter
+    # absolute file path
+    filename: ${hydra.runtime.output_dir}/${hydra.job.name}.metrics.log
+root:
+  level: INFO
+  handlers: [console, file]
+loggers:
+  metrics:
+    level: INFO
+    handlers: [metrics]
+    propagate: false  # do not to root logger
+
+disable_existing_loggers: false
