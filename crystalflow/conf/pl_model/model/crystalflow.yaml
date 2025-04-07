@@ -2,7 +2,7 @@ _target_: crystalflow.models.flow.FlowModule
 defaults:
   - vector_field: simple_gnn
   - scheduler: CondOTScheduler
-  - types_probpath: EmbeddingMinus1
+  - types_probpath: IdentityFake
   - lattice_probpath: LatticePolar
   - frac_coords_probpath: WrapGaussian
 cost:
