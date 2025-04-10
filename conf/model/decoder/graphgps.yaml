@@ -1,0 +1,10 @@
+_target_: diffcsp.pl_modules.graphgps.GraphGPS
+hidden_dim: 512
+latent_dim: 0
+lattice_dim: 9
+num_layers: 6
+act_fn: silu
+num_freqs: 128
+edge_style: fc
+max_neighbors: ${model.max_neighbors}
+cutoff: ${model.radius}
