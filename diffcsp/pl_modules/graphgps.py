@@ -98,7 +98,12 @@ class GraphGPS(nn.Module):
 
         self.convs = nn.ModuleList(
             [
-                GraphGPSLayer(channels=hidden_dim, edge_dim=edge_dim, act_fn=self.act_fn)
+                GraphGPSLayer(
+                    channels=hidden_dim,
+                    edge_dim=edge_dim,
+                    act_fn=self.act_fn,
+                    attn_kwargs = {'dropout': 0.5}
+                )
                 for _ in range(num_layers)
             ]
         )
@@ -178,11 +183,16 @@ class GraphGPSLayer(nn.Module):
             nn.Linear(channels, channels),
             act_fn,
             nn.Linear(channels, channels),
+            act_fn,
+            nn.Linear(channels, channels),
+            act_fn,
+            nn.Linear(channels, channels),
         )
         self.conv = GPSConv(
             channels,
             GINEConv(nn=nn_model, edge_dim=edge_dim),
             heads=4,
+            act=act_fn,
             attn_type="multihead",
             attn_kwargs=attn_kwargs,
         )
