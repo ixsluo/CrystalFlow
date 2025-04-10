@@ -102,7 +102,7 @@ class GraphGPS(nn.Module):
                     channels=hidden_dim,
                     edge_dim=edge_dim,
                     act_fn=self.act_fn,
-                    attn_kwargs = {'dropout': 0.5}
+                    # attn_kwargs = {'dropout': 0.5},
                 )
                 for _ in range(num_layers)
             ]
