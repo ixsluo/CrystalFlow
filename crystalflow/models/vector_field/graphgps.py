@@ -158,7 +158,7 @@ class GraphGPSLayer(nn.Module):
         self.conv = GPSConv(
             channels,
             GINEConv(nn=nn_model, edge_dim=edge_dim),
-            heads=4,
+            heads=128,
             attn_type="multihead",
             attn_kwargs=attn_kwargs,
         )
