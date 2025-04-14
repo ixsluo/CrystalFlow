@@ -1,4 +1,4 @@
-_target_: diffcsp.pl_modules.graphgps.GraphGPS
+_target_: diffcsp.pl_modules.crysformer.CrysFormer
 hidden_dim: 512
 latent_dim: 0
 num_layers: 6
