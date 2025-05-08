@@ -373,6 +373,7 @@ class CSPFlow(BaseModule):
             t = torch.tensor(t)
         return 1 + slope * F.relu(t - offset)
 
+
     def post_decoder_on_sample(
         self, pred,
         batch, t,
@@ -383,6 +384,8 @@ class CSPFlow(BaseModule):
             pred_l, pred_f, pred_t = pred
         else:
             pred_l, pred_f = pred
+
+        # symmetrize
         if self.symmetrize_anchor:
             if self.lattice_polar:
                 pred_l = self.latticedecompnn.proj_kdiff_to_spacegroup(pred_l, batch.spacegroup)
@@ -403,6 +406,8 @@ class CSPFlow(BaseModule):
                 symm_map=batch.symm_map,
                 num_general_ops=batch.num_general_ops,
             )
+
+        # anti annealing
         anneal_factor = self.get_anneal_factor(t, anneal_slope, anneal_offset)
         if anneal_lattice:
             pred_l *= anneal_factor
@@ -421,6 +426,8 @@ class CSPFlow(BaseModule):
         anneal_lattice=False, anneal_coords=False, anneal_type=False,
         anneal_slope=0.0, anneal_offset=0.0,
         guide_factor=None,
+        corrector="time_scheduled_langevin",
+        corrector_steps=0,
         **kwargs,
     ):
         """
@@ -585,13 +592,33 @@ class CSPFlow(BaseModule):
             f_t = f_t % 1.0
             if self.pred_type:
                 t_t = t_t + pred_t / N
-            # ========= update each step end =========
 
-            # ========= build trajectory start =========
             if self.lattice_polar:
                 lattices_mat_t = lattice_polar_build_torch(l_t)
             else:
                 lattices_mat_t = l_t
+
+            # corrector
+            if corrector_steps > 0:
+                if corrector == "time_scheduled_langevin":
+                    t_next_stamp = (t + 1) / N
+                    l_t, f_t, t_t = self.time_scheduled_langevin_corrector(
+                        t_next_stamp=t_next_stamp,
+                        a_t=t_t,
+                        f_t=f_t,
+                        l_t=l_t,
+                        lattices_mat_t=lattices_mat_t,
+                        num_atoms=batch.num_atoms,
+                        batch_size=batch_size,
+                        batch=batch.batch,
+                        n_steps=corrector_steps,
+                    )
+                else:
+                    raise NotImplementedError(f"Unsupported corrector: '{corrector}'")
+
+            # ========= update each step end =========
+
+            # ========= build trajectory start =========
 
             if self.pred_type:
                 if self.type_encoding is None:
@@ -621,6 +648,66 @@ class CSPFlow(BaseModule):
         }
 
         return traj[N], traj_stack
+
+    # =======================================================================
+    # predictor-corrector sampler
+
+    # langevin corrector
+    def time_dependent_sigma(self, t):
+        return 0.03 * (1.0 - t) + 0.003 * t  # large to small at t=0->1
+
+    def time_scheduled_langevin_corrector(
+        self,
+        t_next_stamp,
+        a_t,
+        f_t,
+        l_t,
+        lattices_mat_t,
+        num_atoms,
+        batch_size,
+        batch,
+        n_steps=1
+    ):
+        sigma = self.time_dependent_sigma(t_next_stamp)
+
+        times = torch.full((batch_size,), t_next_stamp, device=self.device)
+        time_emb = self.time_embedding(times)
+
+        for _ in range(n_steps):
+            pred = self.decoder(
+                t=time_emb,
+                atom_types=a_t,
+                frac_coords=f_t,
+                lattices_rep=l_t,
+                num_atoms=num_atoms,
+                node2graph=batch,
+                lattices_mat=lattices_mat_t,
+                cemb=None, guide_indicator=None,
+            )
+            noise_a = torch.randn_like(a_t, dtype=torch.float)
+            noise_l = torch.randn_like(l_t)
+            noise_f = torch.randn_like(f_t)
+
+            if self.pred_type:
+                score_l, score_f, score_a = pred
+            else:
+                score_l, score_f = pred
+
+            if self.pred_type:
+                a_t = a_t + sigma**2 * score_a + sigma * noise_a
+            # l_t = l_t + sigma**2 * score_l + sigma * noise_l
+            f_t = f_t + sigma**2 * score_f + sigma * noise_f
+
+            if self.lattice_polar:
+                lattices_mat_t = lattice_polar_build_torch(l_t)
+            else:
+                lattices_mat_t = l_t
+
+        return l_t, f_t, a_t
+
+
+    # =======================================================================
+    # complecate multi-step sampler (e.g. rk4)
 
     def single_time_decoder(self, t, **kwargs):
         batch_size = kwargs["num_atoms"].shape[0]
