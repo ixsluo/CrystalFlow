@@ -88,6 +88,7 @@ def main(args):
         step_lr=step_lr, N=args.ode_int_steps,
         anneal_lattice=args.anneal_lattice, anneal_coords=args.anneal_coords, anneal_type=args.anneal_type, anneal_slope=args.anneal_slope, anneal_offset=args.anneal_offset,
         guide_factor=args.guide_factor,
+        corrector=args.corrector, corrector_steps=args.corrector_steps,
     )
 
     if args.label == '':
@@ -125,6 +126,10 @@ if __name__ == '__main__':
     anneal_group.add_argument('--anneal_type', action="store_true", help="Anneal type.")
     anneal_group.add_argument('--anneal_slope', type=float, default=0.0, help="Anneal scope")
     anneal_group.add_argument('--anneal_offset', type=float, default=0.0, help="Anneal offset.")
+
+    corrector_group = parser.add_argument_group('corrector')
+    corrector_group.add_argument('--corrector', type=str, default="time_scheduled_langevin", help="Corrector.")
+    corrector_group.add_argument('--corrector_steps', type=int, default=0, help="Corrector steps.")
 
     guidance_group = parser.add_argument_group('guidance')
     guidance_group.add_argument('--guide-factor', type=float, help='guidance factor (default: None)')
