@@ -36,6 +36,29 @@ class SinusoidsEmbedding(nn.Module):
         return emb
 
 
+class PeriodicNorm(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, metrics, scaled_r):
+        """
+        Parameters
+        ----------
+        metrics: torch.Tensor
+            Metrics matrix, symmetric. Shape of (E, 3, 3).
+        scaled_r: torch.Tensor
+            Vectors in fractional coordinates of the lattice cell. Shape of (E, 3).
+        Results
+        -------
+        norm: torch.Tensor, shape (E,)
+        """
+        a = 1 - torch.cos(2 * math.pi * scaled_r)
+        b = torch.sin(2 * math.pi * scaled_r)
+        cos_term = torch.einsum("em,emn,en->e", a, metrics, a)
+        sin_term = torch.einsum("em,emn,en->e", b, metrics, b)
+        return (1 / (2 * math.pi)) * torch.sqrt(cos_term + sin_term)
+
+
 class RecSinusoidsEmbedding(nn.Module):
     def __init__(self, n_millers=10):
         super().__init__()
@@ -67,6 +90,7 @@ class CSPLayer(nn.Module):
         dis_emb=None,
         rec_emb=None,
         na_emb=None,
+        periodic_norm=None,
         ln=False,
         ip=True,
         use_angles=False,
@@ -77,6 +101,7 @@ class CSPLayer(nn.Module):
         self.dis_emb = dis_emb
         self.rec_emb = rec_emb
         self.na_emb = na_emb
+        self.periodic_norm = periodic_norm
         self.ip = ip
         self.use_angles = use_angles
 
@@ -88,6 +113,8 @@ class CSPLayer(nn.Module):
             self.dis_dim += na_emb.embedding_dim
         if use_angles:
             self.dis_dim += 3
+        if periodic_norm is not None:
+            self.dis_dim += 1
 
         self.edge_mlp = nn.Sequential(
             nn.Linear(hidden_dim * 2 + lattice_dim + self.dis_dim, hidden_dim),
@@ -132,6 +159,12 @@ class CSPLayer(nn.Module):
         if self.na_emb is not None:
             na_emb = self.na_emb(num_atoms.repeat_interleave(num_atoms, dim=0))[edge_index[0]]
             inputs.append(na_emb)
+
+        if self.periodic_norm is not None:
+            metrics = (lattices_mat.transpose(-1, -2) @ lattices_mat)[edge2graph]
+            norm = self.periodic_norm(metrics, frac_diff)
+            norm = norm.view(-1, 1)
+            inputs.append(norm)
 
         if self.use_angles:  # angles between edges and lattices vectors
             cart_diff = torch.einsum("ei,eij->ej", frac_diff, lattices_mat[edge2graph])  # (E,3)
@@ -192,6 +225,7 @@ class CSPNet(nn.Module):
         num_freqs=10,
         rec_emb='none',  # reciprocal distance embedding
         num_millers=5,
+        periodic_norm=False,
         na_emb=0,  # number of atoms embedding
         edge_style='fc',
         cutoff=6.0,
@@ -235,6 +269,10 @@ class CSPNet(nn.Module):
             self.na_emb = nn.Embedding(max_atoms, na_emb)  # with trainable params, but same in each layer
         else:
             self.na_emb = None
+        if periodic_norm:
+            self.periodic_norm = PeriodicNorm()
+        else:
+            self.periodic_norm = None
 
         for i in range(0, num_layers):
             self.add_module(
@@ -246,6 +284,7 @@ class CSPNet(nn.Module):
                     dis_emb=self.dis_emb,
                     rec_emb=self.rec_emb,
                     na_emb=self.na_emb,
+                    periodic_norm=self.periodic_norm,
                     ln=ln,
                     ip=ip,
                     use_angles=use_angles,
