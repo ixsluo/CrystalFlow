@@ -492,6 +492,7 @@ def main(args):
         if args.multi_eval:
             rec_evaluator = RecEvalBatch(pred_crys, gt_crys)
         else:
+            # rec_evaluator = RecEval(pred_crys, gt_crys, stol=0.3, angle_tol=5, ltol=0.2)
             rec_evaluator = RecEval(pred_crys, gt_crys)
 
         recon_metrics = rec_evaluator.get_metrics()
