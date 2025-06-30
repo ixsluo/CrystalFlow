@@ -1,0 +1,13 @@
+_target_: diffcsp.pl_modules.gemnet.GemNetTWrapper
+num_targets: 1
+latent_dim: 512
+atom_embedding:
+  _target_: diffcsp.common.gemnet.layers.embedding_block.AtomEmbedding  # CSP
+  emb_size: 256
+  with_mask_type: false
+emb_size_atom: 256
+emb_size_edge: 256
+cutoff: 7.0
+num_blocks: 3
+regress_stress: true
+otf_graph: true

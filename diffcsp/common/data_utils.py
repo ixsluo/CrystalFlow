@@ -339,6 +339,12 @@ def lattice_matrix_to_params_torch(batch_lattice):
     raise NotImplementedError()
 
 
+#      k1           k2          k3          k4            k5          k6
+# [[0, 1, 0],  [[0, 0, 1], [[0, 0, 0],  [[1, 0, 0],  [[1, 0, 0],  [[1, 0, 0],
+#  [1, 0, 0],   [0, 0, 0],  [0, 0, 1],   [0,-1, 0],   [0, 1, 0],   [0, 1, 0],
+#  [0, 0, 0]]   [1, 0, 0]]  [0, 1, 0]]   [0, 0, 0]]   [0, 0,-2]]   [0, 0, 1]]
+
+
 def lattice_polar_decompose(lattice: np.ndarray):
     assert lattice.ndim == 2
     A, U = np.linalg.eigh(lattice @ lattice.T)
@@ -371,14 +377,7 @@ def lattice_polar_build(k: np.ndarray):
     return expS
 
 
-@torch.no_grad()
-def lattice_polar_decompose_torch(lattices: torch.Tensor):
-    assert lattices.dim() == 3, "input must be batched lattices of shape (B,3,3)"
-    A, U = torch.linalg.eigh(lattices @ lattices.transpose(-1,-2))  # J = L^T @ L
-    # S = 1/2 U log(A) U^T
-    A = torch.diag_embed(A.log()) / 2
-    S = U @ A @ U.transpose(-1, -2)
-
+def decompose_symmetric_matrix(S: torch.Tensor):
     k0 = S[:, 0, 1]
     k1 = S[:, 0, 2]
     k2 = S[:, 1, 2]
@@ -386,6 +385,17 @@ def lattice_polar_decompose_torch(lattices: torch.Tensor):
     k4 = (S[:, 0, 0] + S[:, 1, 1] - 2 * S[:, 2, 2]) / 6
     k5 = (S[:, 0, 0] + S[:, 1, 1] + S[:, 2, 2]) / 3
     k = torch.vstack([k0, k1, k2, k3, k4, k5]).transpose(-1, -2)
+    return k
+
+
+@torch.no_grad()
+def lattice_polar_decompose_torch(lattices: torch.Tensor):
+    assert lattices.dim() == 3, "input must be batched lattices of shape (B,3,3)"
+    A, U = torch.linalg.eigh(lattices @ lattices.transpose(-1,-2))  # J = L^T @ L
+    # S = 1/2 U log(A) U^T
+    A = torch.diag_embed(A.log()) / 2
+    S = U @ A @ U.transpose(-1, -2)
+    k = decompose_symmetric_matrix(S)
     return k
 
 @torch.no_grad()
@@ -461,6 +471,14 @@ def cart_to_frac_coords(
     if regularized:
         frac_coords = frac_coords % 1.
     return frac_coords
+
+
+def frac_to_cart_coords_with_lattice(
+    frac_coords: torch.Tensor, num_atoms: torch.Tensor, lattice: torch.Tensor
+) -> torch.Tensor:
+    lattice_nodes = torch.repeat_interleave(lattice, num_atoms, dim=0)
+    pos = torch.einsum("bi,bij->bj", frac_coords, lattice_nodes)  # cart coords
+    return pos
 
 
 def get_pbc_distances(
