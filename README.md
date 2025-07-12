@@ -2,7 +2,7 @@
 
 Implementation codes for CrystalFlow: A Flow-Based Generative Model for Crystalline Materials.
 
-For MindSpore implementation please refer to XXX.
+For MindSpore implementation please refer to [here](https://gitee.com/mindspore/mindscience/tree/master/MindChemistry/applications/crystalflow).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ixsluo/CrystalFlow/blob/main/LICENSE)   [**[Paper]**](https://arxiv.org/abs/2412.11693)
 
