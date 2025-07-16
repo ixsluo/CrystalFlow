@@ -155,20 +155,37 @@ def _is_odd(structure: Structure):
     return False
 
 
-def get_rms_dist(pred: Crystal, gt, is_valid, matcher):
+MAX_RMSD = 0.5
+
+
+def get_rms_dist(pred: Crystal, gt, is_valid, matcher, assess_all=False, norm=True):
+
+    def av_lat(l1: Lattice, l2: Lattice):
+        params = (np.array(l1.parameters) + np.array(l2.parameters)) / 2
+        return Lattice.from_parameters(*params)
+
     if not pred.constructed:
-        return None
+        rms_dist = None
     elif _is_odd(pred.structure):
-        return None
+        rms_dist = None
     if not is_valid:
-        return None
+        rms_dist = None
+
     try:
-        rms_dist = matcher.get_rms_dist(
-            pred.structure, gt.structure)
-        rms_dist = None if rms_dist is None else rms_dist[0]
-        return rms_dist
+        rms_dist = matcher.get_rms_dist(pred.structure, gt.structure)
+        rms_dist = rms_dist[0]
     except Exception:
-        return None
+        rms_dist = None
+
+    if (rms_dist is None) and assess_all:
+        rms_dist = MAX_RMSD
+
+    if norm:
+        return rms_dist
+    else:
+        avg_l = av_lat(pred.structure.lattice, gt.structure.lattice)
+        normalization = (len(pred.structure) / avg_l.volume) ** (1 / 3)
+        return rms_dist / normalization
 
 
 class RecEval(object):
@@ -222,15 +239,16 @@ class RecEvalBatch(object):
 
     def get_match_rate_and_rms(self):
         def process_one(pred, gt, is_valid):
-            if not is_valid:
-                return None
-            try:
-                rms_dist = self.matcher.get_rms_dist(
-                    pred.structure, gt.structure)
-                rms_dist = None if rms_dist is None else rms_dist[0]
-                return rms_dist
-            except Exception:
-                return None
+            return get_rms_dist(pred.structure, gt.structure, is_valid, self.matcher)
+            # if not is_valid:
+            #     return None
+            # try:
+            #     rms_dist = self.matcher.get_rms_dist(
+            #         pred.structure, gt.structure)
+            #     rms_dist = None if rms_dist is None else rms_dist[0]
+            #     return rms_dist
+            # except Exception:
+            #     return None
 
         rms_dists = []
         self.all_rms_dis = np.zeros((self.batch_size, len(self.gts)))
