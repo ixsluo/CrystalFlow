@@ -99,6 +99,8 @@ class Crystal(object):
             if self.structure.volume < 0.1:
                 self.constructed = False
                 self.invalid_reason = 'unrealistically_small_lattice'
+        if not hasattr(self, "constructed"):
+            raise ValueError("XXX")
 
     def get_composition(self):
         elem_counter = Counter(self.atom_types)
@@ -239,7 +241,7 @@ class RecEvalBatch(object):
 
     def get_match_rate_and_rms(self):
         def process_one(pred, gt, is_valid):
-            return get_rms_dist(pred.structure, gt.structure, is_valid, self.matcher)
+            return get_rms_dist(pred, gt, is_valid, self.matcher)
             # if not is_valid:
             #     return None
             # try:
@@ -509,6 +511,7 @@ def main(args):
 
         if args.multi_eval:
             rec_evaluator = RecEvalBatch(pred_crys, gt_crys)
+            # rec_evaluator = RecEvalBatch(pred_crys, gt_crys, stol=0.3, angle_tol=5, ltol=0.2)
         else:
             rec_evaluator = RecEval(pred_crys, gt_crys)
 
