@@ -7,26 +7,23 @@ class AtomTypeModuleBase(nn.Module):
 
 
 class EmbeddingMinus1(AtomTypeModuleBase):
-    def __init__(self, dim, need_smooth: bool):
+    def __init__(self, embedding_dim):
         """Embedding minus 1
 
         Arguments
         ---------
             dim: int
                 "nn.Embedding" out dim.
-            need_smooth: bool
-                Mark of needing additional smooth, usually False.
         """
         super().__init__()
-        self.dim = dim
-        self.need_smooth = need_smooth  # additional smooth, usually False
+        self.embedding_dim = embedding_dim
+        self.model = nn.Embedding(100, embedding_dim)
         self.decodeable = False
-
-        self.model = nn.Embedding(100, dim)
 
     def forward(self, x: torch.Tensor):
         return self.model(x - 1)
 
+    # remove this later
     def encode_types(self, x):
         return self(x)
 
@@ -39,8 +36,8 @@ class EmbeddingMinus1(AtomTypeModuleBase):
         return self(atom_types).clone().detach()
 
 
-class TypeTableModule(AtomTypeModuleBase):
-    def __init__(self, dim, need_smooth: bool):
+class ReorderedTable(AtomTypeModuleBase):
+    def __init__(self):
         """Custom type table onehot
 
         Arguments
@@ -53,15 +50,12 @@ class TypeTableModule(AtomTypeModuleBase):
         super().__init__()
         self.num_row = 13
         self.num_col = 15
-        assert dim == self.num_row + self.num_col, "dim must be 28"
-        self.dim = self.num_row + self.num_col
-        self.need_smooth = need_smooth  # additional smooth, usually True
+        self.embedding_dim = self.num_row + self.num_col
         self.decodeable = True
 
         self.register_buffer("reordered_map", reordered_map)
         self.register_buffer("reordered_indices", reordered_indices)
-        mask = torch.where(self.reordered_map > 0, 1.0, 0.0)
-        self.register_buffer("mask", mask)
+        self.register_buffer("mask", torch.where(self.reordered_map > 0, 1.0, 0.0))
 
     def forward(self, atom_types: torch.Tensor):
         return self.encode_types(atom_types)
