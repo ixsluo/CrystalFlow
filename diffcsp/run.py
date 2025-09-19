@@ -10,6 +10,7 @@ import torch
 import omegaconf
 import lightning as pl
 import wandb
+import swanlab
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 from lightning import seed_everything, Callback
@@ -21,11 +22,7 @@ from lightning.pytorch.callbacks import (
 )
 from lightning.pytorch.profilers import SimpleProfiler as Profiler
 from lightning.pytorch.loggers import WandbLogger
-
-try:
-    from finetuning_scheduler import FinetuningScheduler
-except Exception as e:
-    pass
+from swanlab.integration.pytorch_lightning import SwanLabLogger
 
 from diffcsp.common.utils import log_hyperparameters, PROJECT_ROOT
 
@@ -91,8 +88,25 @@ def get_wandb_logger(cfg, save_dir):
             settings=wandb.Settings(start_method="fork"),
             tags=cfg.core.tags,
         )
-    assert wandb_logger is not None, "Currently must set wandb logger"
+    else:
+        hydra.utils.log.info("Not using <WandbLogger>")
     return wandb_logger
+
+
+def get_swanlab_logger(cfg, save_dir):
+    swanlab_logger = None
+    if "swanlab" in cfg.logging:
+        hydra.utils.log.info("Instantiating <SwanLabLogger>")
+        swanlab_config = cfg.logging.swanlab
+        swanlab_logger = SwanLabLogger(
+            **swanlab_config,
+            logdir=save_dir / "swanlab",
+            settings=swanlab.Settings(),
+            tags=cfg.core.tags,
+        )
+    else:
+        hydra.utils.log.info("Not using <SwanLabLogger>")
+    return swanlab_logger
 
 
 def get_datamodule(cfg, scaler_path=None):
@@ -104,16 +118,25 @@ def get_datamodule(cfg, scaler_path=None):
     return datamodule
 
 
-def get_model(cfg_model, cfg_optim, cfg_data, cfg_logging):
+def get_model(cfg_model, cfg_optim, cfg_data, cfg_logging, ckpt=None):
     # Instantiate model
     hydra.utils.log.info(f"Instantiating <{cfg_model._target_}>")
-    model: pl.LightningModule = hydra.utils.instantiate(
-        cfg_model,
-        optim=cfg_optim,
-        data=cfg_data,
-        logging=cfg_logging,
-        _recursive_=False,
-    )
+    if ckpt is None:
+        model: pl.LightningModule = hydra.utils.instantiate(
+            cfg_model,
+            optim=cfg_optim,
+            data=cfg_data,
+            logging=cfg_logging,
+            _recursive_=False,
+        )
+    else:
+        model_class = hydra.utils.get_class(cfg_model._target_)
+        model = model_class.load_from_checkpoint(
+            ckpt,
+            optim=cfg_optim,
+            data=cfg_data,
+            logging=cfg_logging,
+        )
     return model
 
 
@@ -167,7 +190,6 @@ def find_finetune_schedule(cfg, finetune_dir, model=None):
         with open(ft_schedule, "w") as f:
             f.write(textwrap.dedent(f"""\
                 0:  # finetune phase index
-                  # lr: 1e-06  # lr of each stage can be specified
                   # max_transition_epoch: 3
                   params:
                   # - model.albert.pooler.*  # regex is allowed"""))
@@ -206,6 +228,7 @@ def run(cfg: DictConfig) -> None:
         cfg.data.datamodule.num_workers.test = 0
         # Switch wandb mode to offline to prevent online logging
         cfg.logging.wandb.mode = "offline"
+        cfg.logging.swanlab.mode = "offline"
     save_cfg(cfg, run_dir)
 
     datamodule = get_datamodule(cfg, scaler_path=None)
@@ -214,19 +237,21 @@ def run(cfg: DictConfig) -> None:
 
     # Logger instantiation/configuration
     wandb_logger = get_wandb_logger(cfg, run_dir)
-    hydra.utils.log.info("W&B is now watching <{cfg.logging.wandb_watch.log}>!")
+    hydra.utils.log.info(f"W&B is now watching <{cfg.logging.wandb_watch.log}>!")
     wandb_logger.watch(
         model,
         log=cfg.logging.wandb_watch.log,
         log_freq=cfg.logging.wandb_watch.log_freq,
     )
+    swanlab_logger = get_swanlab_logger(cfg, run_dir)
+    loggers = [logger for logger in [wandb_logger, swanlab_logger] if logger is not None]
 
     hydra.utils.log.info("Instantiating the Trainer")
     # Instantiate the callbacks
     callbacks: List[Callback] = build_callbacks(cfg=cfg)
     trainer = pl.Trainer(
         default_root_dir=run_dir,
-        logger=wandb_logger,
+        logger=loggers,
         callbacks=callbacks,
         deterministic=cfg.train.deterministic,
         check_val_every_n_epoch=cfg.logging.val_check_interval,
@@ -245,9 +270,13 @@ def run(cfg: DictConfig) -> None:
     # Logger closing to release resources/avoid multi-run conflicts
     if wandb_logger is not None:
         wandb_logger.experiment.finish()
+    if swanlab_logger is not None:
+        swanlab_logger.experiment.finish()
 
 
 def finetune(cfg):
+    from finetuning_scheduler import FinetuningScheduler
+
     if "finetune_from" not in cfg.train:
         raise ValueError("`train.finetune_from` must be specified in finetune mode")
     finetune_from_dir = Path(cfg.train.finetune_from).absolute()
@@ -269,33 +298,35 @@ def finetune(cfg):
         cfg.data.datamodule.num_workers.test = 0
         # Switch wandb mode to offline to prevent online logging
         cfg.logging.wandb.mode = "offline"
-    save_cfg(cfg, run_dir)
+        cfg.logging.swanlab.mode = "offline"
 
     ori_cfg = find_cfg(finetune_from_dir)
+    cfg.model = ori_cfg.model  # overwrite model config
+    save_cfg(cfg, run_dir)
 
     datamodule = get_datamodule(cfg, scaler_path=finetune_from_dir)
-    model = get_model(ori_cfg.model, cfg.optim, cfg.data, cfg.logging)
+    ckpt = find_ckpt(finetune_from_dir)
+    model = get_model(ori_cfg.model, cfg.optim, cfg.data, cfg.logging, ckpt=ckpt)
     pass_and_save_scaler(model, datamodule, run_dir)
 
     ft_schedule = find_finetune_schedule(cfg, run_dir, model)
 
-    ckpt = find_ckpt(finetune_from_dir)
-    model = model.__class__.load_from_checkpoint(ckpt)
-
     # Logger instantiation/configuration
     wandb_logger = get_wandb_logger(cfg, run_dir)
-    hydra.utils.log.info("W&B is now watching <{cfg.logging.wandb_watch.log}>!")
+    hydra.utils.log.info(f"W&B is now watching <{cfg.logging.wandb_watch.log}>!")
     wandb_logger.watch(
         model,
         log=cfg.logging.wandb_watch.log,
         log_freq=cfg.logging.wandb_watch.log_freq,
     )
+    swanlab_logger = get_swanlab_logger(cfg, run_dir)
+    loggers = [logger for logger in [wandb_logger, swanlab_logger] if logger is not None]
 
     callbacks = build_callbacks(cfg)
     callbacks.append(FinetuningScheduler(ft_schedule=ft_schedule))
     trainer = pl.Trainer(
         default_root_dir=run_dir,
-        logger=wandb_logger,
+        logger=loggers,
         callbacks=callbacks,
         deterministic=cfg.train.deterministic,
         check_val_every_n_epoch=cfg.logging.val_check_interval,
@@ -314,6 +345,8 @@ def finetune(cfg):
     # Logger closing to release resources/avoid multi-run conflicts
     if wandb_logger is not None:
         wandb_logger.experiment.finish()
+    if swanlab_logger is not None:
+        swanlab_logger.experiment.finish()
 
 @hydra.main(config_path=str(PROJECT_ROOT / "conf"), config_name="default", version_base="1.3")
 def main(cfg: omegaconf.DictConfig):

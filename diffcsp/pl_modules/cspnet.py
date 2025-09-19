@@ -236,7 +236,7 @@ class CSPNet(nn.Module):
         smooth=False,
         pred_type=False,
         pred_scalar=False,
-        type_encoding=None | nn.Module,
+        type_encoding: None | nn.Module = None,
     ):
         super(CSPNet, self).__init__()
 
