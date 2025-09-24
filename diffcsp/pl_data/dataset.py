@@ -95,10 +95,20 @@ class CrystDataset(Dataset):
 
         # scaler is set in DataModule set stage
         prop = self.scaler.transform(data_dict[self.prop])
-        prop_dict = {
-            key: scaler.transform(data_dict[key])
-            for key, scaler in zip(self.properties, self.scalers)
-        }
+        if isinstance(self.scalers, list):
+            prop_dict = {
+                key: scaler.transform(data_dict[key])
+                for key, scaler in zip(self.properties, self.scalers, strict=True)
+            }
+        elif isinstance(self.scalers, dict):
+            if any(prop not in self.scalers for prop in self.properties):
+                raise ValueError(f"Property {prop} not found in scalers.")
+            prop_dict = {
+                key: scaler.transform(data_dict[key])
+                for key, scaler in self.scalers.items()
+            }
+        else:
+            raise ValueError("Scalers must be either a list or a dict.")
 
         (frac_coords, atom_types, lengths, angles, edge_indices,
          to_jimages, num_atoms, lattice_polar) = data_dict['graph_arrays']

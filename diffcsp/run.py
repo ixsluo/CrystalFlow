@@ -109,6 +109,28 @@ def get_swanlab_logger(cfg, save_dir):
     return swanlab_logger
 
 
+def ammend_scalers_file(config, origin_path=None, save_path=None):
+    """copy scaler files and ammend prop_scalers.pt from list-type to dict-type"""
+    if origin_path is None:
+        return
+
+    lattice_scaler = torch.load(Path(origin_path) / 'lattice_scaler.pt')
+    torch.save(lattice_scaler, Path(save_path) / 'lattice_scaler.pt')
+
+    scaler = torch.load(Path(origin_path) / 'prop_scaler.pt')
+    torch.save(scaler, Path(save_path) / 'prop_scaler.pt')
+
+    scalers = torch.load(Path(origin_path) / 'prop_scalers.pt')
+    if isinstance(scalers, list):
+        scalers = {key: scaler for key, scaler in zip(config.data.properties, scalers, strict=True)}
+    elif isinstance(scalers, dict):
+        pass
+    else:
+        raise ValueError("Unknown stored scalers type")
+    torch.save(scalers, Path(save_path) / 'prop_scalers.pt')
+
+
+
 def get_datamodule(cfg, scaler_path=None):
     # Instantiate datamodule
     hydra.utils.log.info(f"Instantiating <{cfg.data.datamodule._target_}>")
@@ -140,16 +162,19 @@ def get_model(cfg_model, cfg_optim, cfg_data, cfg_logging, ckpt=None):
     return model
 
 
-def pass_and_save_scaler(model, datamodule, save_dir):
+def pass_scaler_to_model(model, datamodule):
     hydra.utils.log.info(f"Passing scaler from datamodule to model <{datamodule.scaler}>")
     if datamodule.scaler is not None:
         model.lattice_scaler = datamodule.lattice_scaler.copy()
         model.scaler = datamodule.scaler.copy()
         model.scalers = [scaler.copy() for scaler in datamodule.scalers]
-    hydra.utils.log.info(f"Saving scaler to <{save_dir}>")
+
+
+def save_scaler(datamodule, save_dir):
     torch.save(datamodule.lattice_scaler, save_dir / 'lattice_scaler.pt')
     torch.save(datamodule.scaler, save_dir / 'prop_scaler.pt')
     torch.save(datamodule.scalers, save_dir / 'prop_scalers.pt')
+
 
 
 def find_ckpt(ckpt_dir) -> str | None:
@@ -204,6 +229,7 @@ def find_finetune_schedule(cfg, finetune_dir, model=None):
             )
     return ft_schedule
 
+
 def run(cfg: DictConfig) -> None:
     """
     Generic train loop
@@ -233,7 +259,8 @@ def run(cfg: DictConfig) -> None:
 
     datamodule = get_datamodule(cfg, scaler_path=None)
     model = get_model(cfg.model, cfg.optim, cfg.data, cfg.logging)
-    pass_and_save_scaler(model, datamodule, run_dir)
+    pass_scaler_to_model(model, datamodule)
+    save_scaler(datamodule, run_dir)
 
     # Logger instantiation/configuration
     wandb_logger = get_wandb_logger(cfg, run_dir)
@@ -300,14 +327,17 @@ def finetune(cfg):
         cfg.logging.wandb.mode = "offline"
         cfg.logging.swanlab.mode = "offline"
 
-    ori_cfg = find_cfg(finetune_from_dir)
-    cfg.model = ori_cfg.model  # overwrite model config
+
+    # cfg.model = ori_cfg.model  # overwrite model config
     save_cfg(cfg, run_dir)
 
-    datamodule = get_datamodule(cfg, scaler_path=finetune_from_dir)
+    ori_cfg = find_cfg(finetune_from_dir)
+    ammend_scalers_file(ori_cfg, finetune_from_dir, run_dir)
+    datamodule = get_datamodule(cfg, scaler_path=run_dir)
     ckpt = find_ckpt(finetune_from_dir)
-    model = get_model(ori_cfg.model, cfg.optim, cfg.data, cfg.logging, ckpt=ckpt)
-    pass_and_save_scaler(model, datamodule, run_dir)
+    model = get_model(cfg.model, cfg.optim, cfg.data, cfg.logging, ckpt=ckpt)
+    pass_scaler_to_model(model, datamodule)
+    save_scaler(datamodule, run_dir)
 
     ft_schedule = find_finetune_schedule(cfg, run_dir, model)
 
