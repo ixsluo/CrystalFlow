@@ -122,6 +122,7 @@ def ammend_scalers_file(config, origin_path=None, save_path=None):
 
     scalers = torch.load(Path(origin_path) / 'prop_scalers.pt')
     if isinstance(scalers, list):
+        hydra.utils.log.info("ammending prop_scalers.pt from list-type to dict-type")
         scalers = {key: scaler for key, scaler in zip(config.data.properties, scalers, strict=True)}
     elif isinstance(scalers, dict):
         pass
@@ -167,7 +168,7 @@ def pass_scaler_to_model(model, datamodule):
     if datamodule.scaler is not None:
         model.lattice_scaler = datamodule.lattice_scaler.copy()
         model.scaler = datamodule.scaler.copy()
-        model.scalers = [scaler.copy() for scaler in datamodule.scalers]
+        model.scalers = {key: scaler.copy() for key, scaler in datamodule.scalers.items()}
 
 
 def save_scaler(datamodule, save_dir):

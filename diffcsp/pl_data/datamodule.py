@@ -67,6 +67,8 @@ class CrystDataModule(pl.LightningDataModule):
     def _check_scalers(self):
         if isinstance(self.scalers, list):
             raise RuntimeError("You are loading from an old version of list-type scalers.")
+        if self.train_dataset is None:
+            self.train_dataset = hydra.utils.instantiate(self.datasets.train)
         for prop in self.train_dataset.properties:
             if prop not in self.scalers:  # add missing property
                 self.scalers[prop] = get_scaler_from_data_list(self.train_dataset.cached_data, key=prop)
@@ -82,7 +84,7 @@ class CrystDataModule(pl.LightningDataModule):
                 self.scalers = torch.load(Path(scaler_path) / 'prop_scalers.pt')
             except:
                 self.lattice_scaler, self.scaler, self.scalers = self._compute_train_scalers()
-        self._check_scalers()
+            self._check_scalers()
 
     def setup(self, stage: Optional[str] = None):
         """
