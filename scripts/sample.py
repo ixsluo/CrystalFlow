@@ -332,6 +332,16 @@ def main(args):
     print("Model time:", stop_time - start_time)
 
     crystal_list = get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
+
+    torch.save(
+        {
+            "time": stop_time - start_time,
+            "crystal_list": crystal_list,
+            "args": vars(args),
+        },
+        str(args.save_path) + ".pt",
+    )
+
     crystal_traj_list = [
         get_crystals_list(frac_coords, atom_types, lengths, angles, num_atoms)
         for frac_coords, lengths, angles in zip(traj_list[0], traj_list[1], traj_list[2])
