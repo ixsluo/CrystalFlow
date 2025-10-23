@@ -126,3 +126,17 @@ types:
     hidden_dim: 128
     fc_num_layers: 5
     n_out: 128
+
+  dft_mag_density:
+    _target_: diffcsp.pl_modules.conditioning.ScalarEmbedding
+    prop_name: dft_mag_density
+    batch_norm: false
+    no_expansion: false
+    n_basis: 90
+    start: -1
+    stop: 8
+    trainable_gaussians: false
+    no_mlp: true
+    hidden_dim: 128
+    fc_num_layers: 5
+    n_out: 128
