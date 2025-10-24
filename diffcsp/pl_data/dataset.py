@@ -104,7 +104,7 @@ class CrystDataset(Dataset):
             if any(prop not in self.scalers for prop in self.properties):
                 raise ValueError(f"Property {prop} not found in scalers.")
             prop_dict = {
-                key: scaler.transform(data_dict[key])
+                key: scaler.transform(data_dict.get(key, 0.0))
                 for key, scaler in self.scalers.items()
             }
         else:
